@@ -646,6 +646,25 @@ def locate_page_button(driver, page_number, timeout=10):
     raise TimeoutException(f'페이지 {page_number} 버튼 미발견')
 
 
+def locate_next_arrow(driver, timeout=8):
+    """'>' 또는 'Next' 이동 버튼을 찾는다 (10페이지 초과 시 번호 버튼 대신 사용)."""
+    selectors = [
+        (By.CSS_SELECTOR, "button[class*='stats-Pagination_next']"),
+        (By.CSS_SELECTOR, "button[class*='stats-Pagination_Next']"),
+        (By.CSS_SELECTOR, "button[class*='Pagination_arrow_next']"),
+        (By.XPATH, "//button[normalize-space(.)='>'][not(@disabled)]"),
+        (By.XPATH, "//button[normalize-space(.)='Next'][not(@disabled)]"),
+    ]
+    end_time = time.time() + timeout
+    while time.time() < end_time:
+        for by, value in selectors:
+            for el in driver.find_elements(by, value):
+                if el.is_displayed() and el.is_enabled():
+                    return el
+        time.sleep(0.3)
+    return None
+
+
 def go_to_next_page(driver, current_page, config):
     if check_seat_limit(driver):
         time.sleep(config.SEAT_LIMIT_WAIT_SECONDS)
@@ -657,7 +676,16 @@ def go_to_next_page(driver, current_page, config):
     time.sleep(2)
 
     try:
-        btn = locate_page_button(driver, next_page)
+        # 번호 버튼 우선 시도 (timeout 단축), 없으면 '>' 화살표 사용
+        try:
+            btn = locate_page_button(driver, next_page, timeout=5)
+        except TimeoutException:
+            btn = locate_next_arrow(driver)
+
+        if btn is None:
+            print(f'[경고] 페이지 {next_page} 버튼 및 Next 화살표 미발견 → 크롤링 종료')
+            return None
+
         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
         driver.execute_script('arguments[0].click();', btn)
 
@@ -672,8 +700,8 @@ def go_to_next_page(driver, current_page, config):
         time.sleep(2)
         return next_page
 
-    except:
-        print(f'[경고] 페이지 {next_page} 버튼 미발견 → 크롤링 종료')
+    except Exception as e:
+        print(f'[경고] 페이지 {next_page} 이동 실패: {e} → 크롤링 종료')
         return None
 
 
