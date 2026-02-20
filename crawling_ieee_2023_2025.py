@@ -387,28 +387,42 @@ def apply_publication_filter(driver, journal_name):
             print('[OK] Publication Title 섹션 펼침')
 
         # 섹션 내 검색 입력창
+        # DOM 구조: <header> (grandparent of btn) > following-sibling > input[placeholder='Enter Title']
         search_input = WebDriverWait(driver, 10).until(
             EC.presence_of_element_located(
                 (By.XPATH,
                  "//button[normalize-space(.)='Publication Title']"
-                 "/following::input[@type='text' or @type='search'][1]")
+                 "/../../following-sibling::*//input[@placeholder='Enter Title' or @placeholder='Enter title']")
             )
         )
         search_input.clear()
-        search_input.send_keys(journal_name[:20])  # 앞 20자만 입력
-        time.sleep(3)
+        search_input.send_keys('Geoscience and Remote Sensing')
+        time.sleep(4)  # 자동완성 결과 로딩 대기
 
         # 해당 저널 체크박스 레이블 클릭
+        # "IEEE Transactions on Geoscience and Remote Sensing" 정확히 선택
         label = WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable(
                 (By.XPATH,
-                 f"//label[contains(normalize-space(), 'Geoscience and Remote Sensing')]"
-                 f"[not(contains(normalize-space(), 'Letters'))]")
+                 "//label[contains(normalize-space(), 'Transactions on Geoscience and Remote Sensing')]")
             )
         )
         driver.execute_script('arguments[0].click();', label)
-        print(f'[OK] 저널 필터 적용: {label.text[:60]}')
-        time.sleep(5)
+        print('[OK] 저널 선택: ' + label.text[:60])
+        time.sleep(2)
+
+        # Apply 버튼 클릭 (displayed=True, enabled=True인 것 선택)
+        # Year 필터용 Apply(disabled)와 Publication Title용 Apply(enabled) 중 enabled 것을 클릭
+        apply_btn = WebDriverWait(driver, 10).until(
+            lambda d: next(
+                (b for b in d.find_elements(By.CSS_SELECTOR, "button.stats-applyRefinements-button")
+                 if b.is_displayed() and b.is_enabled()),
+                None
+            )
+        )
+        driver.execute_script('arguments[0].click();', apply_btn)
+        print('[OK] Apply 클릭 → 저널 필터 적용 완료')
+        time.sleep(8)  # 필터 결과 로딩 대기
         return True
 
     except Exception as e:
