@@ -48,14 +48,16 @@ warnings.filterwarnings('ignore')
 DEFAULT_SAVE_PATH_LINUX   = '/nas1/hyperspectral_literature_data_collected/01_IEEE_TGRS_1980_2025'
 DEFAULT_SAVE_PATH_WINDOWS = os.path.join(os.path.expanduser('~'), 'Downloads', 'IEEE_TGRS')
 
-# ==================== 국민대 도서관 URL / XPath ====================
-LOGIN_URL    = 'https://lib.kookmin.ac.kr/login?returnUrl=%3F&queryParamsHandling=merge'
+# ==================== 국민대 도서관 URL / Selector ====================
+LOGIN_URL     = 'https://lib.kookmin.ac.kr/login?returnUrl=%3F&queryParamsHandling=merge'
 DB_SEARCH_URL = 'https://lib.kookmin.ac.kr/search/database?keyword=IEEE'
 
-XPATH_ID_FIELD    = '//*[@id="mat-input-16"]'
-XPATH_PW_FIELD    = '//*[@id="mat-input-17"]'
-XPATH_LOGIN_BTN   = '//*[@id="content"]/ng-component/div/div[2]/form/div/button/span[1]'
-XPATH_IEEE_LINK   = '//*[@id="content"]/ng-component/ik-er-sources/section/ik-er-sources-list-view/div/div[2]/div[2]/a'
+# mat-input ID는 Angular가 동적으로 부여 → formcontrolname 속성으로 대신 찾음
+CSS_ID_FIELD   = 'input[formcontrolname="portalUserId"]'
+CSS_PW_FIELD   = 'input[formcontrolname="portalPassword"]'
+XPATH_LOGIN_BTN = '//button[@type="submit" and normalize-space(.)="로그인"]'
+# IEEE 링크: 텍스트에 "IEL" 또는 "IEEE"가 포함된 a 태그 (XPath는 렌더링 환경에 따라 변함)
+XPATH_IEEE_LINK = '//a[contains(text(), "IEL") or (contains(text(), "IEEE") and string-length(text()) > 5)]'
 
 IEEE_PROXY_HOME   = 'https://ieeexplore-ieee-org-ssl.proxy.kookmin.ac.kr/Xplore/home.jsp'
 
@@ -83,6 +85,11 @@ class CrawlConfig:
         print(f"[저장 경로] {self.SAVE_PATH}")
 
 
+# Linux 서버에 Chrome 145 수동 설치 경로 (환경변수로 오버라이드 가능)
+CHROME_BIN_LINUX      = '/data/khkim/chrome_local/chrome_extracted/opt/google/chrome/google-chrome'
+CHROMEDRIVER_BIN_LINUX = '/data/khkim/chrome_local/chromedriver-linux64/chromedriver'
+
+
 # ==================== Chrome 드라이버 설정 ====================
 def setup_chrome_driver(download_dir, headless=False):
     """Chrome 드라이버 초기화
@@ -100,13 +107,14 @@ def setup_chrome_driver(download_dir, headless=False):
     else:
         options.add_argument('--start-maximized')
 
-    # 공통
+    # 공통 - 봇 감지 차단
     options.add_argument('--disable-blink-features=AutomationControlled')
+    options.add_argument('--window-size=1920,1080')
     options.add_argument(
         'user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-        'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36'
     )
-    options.add_experimental_option('excludeSwitches', ['enable-logging'])
+    options.add_experimental_option('excludeSwitches', ['enable-automation', 'enable-logging'])
     options.add_experimental_option('useAutomationExtension', False)
 
     # 다운로드 설정
@@ -118,18 +126,40 @@ def setup_chrome_driver(download_dir, headless=False):
         'plugins.always_open_pdf_externally': True,
     }
     options.add_experimental_option('prefs', prefs)
-    options.page_load_strategy = 'eager'
+    options.page_load_strategy = 'normal'
 
     try:
-        try:
-            from webdriver_manager.chrome import ChromeDriverManager
-            service = Service(ChromeDriverManager().install())
-            print('[ChromeDriver] webdriver-manager 로 자동 관리')
-        except ImportError:
-            service = Service()
-            print('[ChromeDriver] 시스템 PATH의 chromedriver 사용')
+        # Chrome 바이너리 / ChromeDriver 경로 결정
+        # 우선순위: 환경변수 > Linux 서버 수동 설치 경로 > 시스템 PATH
+        chrome_bin    = os.environ.get('CHROME_BINARY', '')
+        chromedriver  = os.environ.get('CHROMEDRIVER_PATH', '')
+
+        if not chrome_bin and Path(CHROME_BIN_LINUX).exists():
+            chrome_bin = CHROME_BIN_LINUX
+        if not chromedriver and Path(CHROMEDRIVER_BIN_LINUX).exists():
+            chromedriver = CHROMEDRIVER_BIN_LINUX
+
+        if chrome_bin:
+            options.binary_location = chrome_bin
+            print(f'[ChromeDriver] Chrome 바이너리: {chrome_bin}')
+
+        if chromedriver:
+            service = Service(chromedriver)
+            print(f'[ChromeDriver] ChromeDriver: {chromedriver}')
+        else:
+            try:
+                from webdriver_manager.chrome import ChromeDriverManager
+                service = Service(ChromeDriverManager().install())
+                print('[ChromeDriver] webdriver-manager 로 자동 관리')
+            except ImportError:
+                service = Service()
+                print('[ChromeDriver] 시스템 PATH의 chromedriver 사용')
 
         driver = webdriver.Chrome(service=service, options=options)
+        # navigator.webdriver 속성 숨기기 (프록시 봇 감지 차단)
+        driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+            'source': 'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
+        })
         driver.set_page_load_timeout(60)
         mode_str = 'headless' if headless else 'GUI'
         print(f'[Chrome] 드라이버 초기화 완료 ({mode_str})')
@@ -166,11 +196,11 @@ def login_kookmin_library(driver, username, password):
 
     try:
         driver.get(LOGIN_URL)
-        time.sleep(3)
+        time.sleep(5)
 
-        # ID 입력
+        # ID 입력 (formcontrolname 기반 - mat-input ID는 동적으로 변함)
         id_field = WebDriverWait(driver, 15).until(
-            EC.element_to_be_clickable((By.XPATH, XPATH_ID_FIELD))
+            EC.element_to_be_clickable((By.CSS_SELECTOR, CSS_ID_FIELD))
         )
         id_field.clear()
         id_field.send_keys(username)
@@ -179,7 +209,7 @@ def login_kookmin_library(driver, username, password):
 
         # 비밀번호 입력
         pw_field = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH, XPATH_PW_FIELD))
+            EC.element_to_be_clickable((By.CSS_SELECTOR, CSS_PW_FIELD))
         )
         pw_field.clear()
         pw_field.send_keys(password)
@@ -210,15 +240,24 @@ def access_ieee_via_library(driver):
 
     try:
         driver.get(DB_SEARCH_URL)
-        time.sleep(4)
+        # Angular SSG 렌더링 대기 (최대 20초 폴링)
+        ieee_link = None
+        for _ in range(20):
+            time.sleep(1)
+            for lnk in driver.find_elements(By.TAG_NAME, 'a'):
+                t = lnk.text.strip()
+                if 'IEL' in t or ('IEEE' in t and len(t) > 10):
+                    ieee_link = lnk
+                    break
+            if ieee_link:
+                break
 
-        # IEEE 링크 클릭 → 새 창이 열림
-        ieee_link = WebDriverWait(driver, 15).until(
-            EC.element_to_be_clickable((By.XPATH, XPATH_IEEE_LINK))
-        )
+        if not ieee_link:
+            raise Exception('IEEE 링크를 찾을 수 없음 (20초 대기 후)')
 
+        print(f'[OK] IEEE 링크 발견: {ieee_link.text[:60]}')
         original_handles = set(driver.window_handles)
-        ieee_link.click()
+        driver.execute_script('arguments[0].click();', ieee_link)  # JS 클릭 (Angular 라우터 호환)
         print('[OK] IEEE 링크 클릭 → 새 창 대기 중...')
 
         # 새 창이 열릴 때까지 대기 (최대 15초)
@@ -229,7 +268,8 @@ def access_ieee_via_library(driver):
         # 새 창으로 전환
         new_handle = (set(driver.window_handles) - original_handles).pop()
         driver.switch_to.window(new_handle)
-        time.sleep(4)
+        # 프록시 세션 확립 + IEEE Xplore 렌더링 대기 (15초 필요)
+        time.sleep(15)
 
         print(f'[OK] IEEE Xplore 창으로 전환 완료')
 
@@ -274,9 +314,23 @@ def setup_ieee_advanced_search(driver, year):
         driver.refresh()
         time.sleep(5)
 
+        # Year Range 라디오 버튼 클릭 (날짜범위 대신 연도범위 선택)
+        try:
+            year_radio = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "input[name='range'][id='id_1']"))
+            )
+            driver.execute_script('arguments[0].click();', year_radio)
+            print('[OK] Year Range 라디오 선택')
+            time.sleep(1)
+        except Exception:
+            print('[경고] Year Range 라디오 못 찾음 (계속 진행)')
+
+        # Start/End Year 입력 (aria-label 기반)
         start_year_field = WebDriverWait(driver, 15).until(
             EC.presence_of_element_located(
-                (By.CSS_SELECTOR, "input[placeholder*='Start Year'], input[name*='startYear']")
+                (By.CSS_SELECTOR,
+                 "input[aria-label*='start year'], input[aria-label*='Start Year'], "
+                 "input[placeholder*='Start Year'], input[name*='startYear']")
             )
         )
         start_year_field.clear()
@@ -285,21 +339,26 @@ def setup_ieee_advanced_search(driver, year):
         time.sleep(0.5)
 
         end_year_field = driver.find_element(
-            By.CSS_SELECTOR, "input[placeholder*='End Year'], input[name*='endYear']"
+            By.CSS_SELECTOR,
+            "input[aria-label*='end year'], input[aria-label*='End Year'], "
+            "input[placeholder*='End Year'], input[name*='endYear']"
         )
         end_year_field.clear()
         end_year_field.send_keys(str(year))
         print(f'[OK] 종료 연도: {year}')
         time.sleep(0.5)
 
+        # Advanced Search 전용 버튼 (stats-Adv_search 클래스)
+        # JS 클릭 사용 - Osano 쿠키 팝업 등 오버레이가 가로막는 경우 대비
         search_button = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable(
-                (By.CSS_SELECTOR, "button[type='submit'], button.submit-button")
+            EC.presence_of_element_located(
+                (By.CSS_SELECTOR, "button.stats-Adv_search, button.xpl-btn-primary")
             )
         )
-        search_button.click()
+        driver.execute_script('arguments[0].click();', search_button)
         print('[OK] 검색 실행')
-        time.sleep(5)
+        # 검색 결과 로딩 대기
+        time.sleep(10)
 
         print(f'현재 URL: {driver.current_url}\n')
         return True
@@ -314,30 +373,46 @@ def apply_publication_filter(driver, journal_name):
     print(f'4단계: 저널 필터 적용 - {journal_name}')
 
     try:
-        pub_section = WebDriverWait(driver, 15).until(
+        # "Publication Title" 섹션 토글 버튼 찾기 (접혀 있으면 펼침)
+        pub_btn = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located(
+                (By.XPATH, "//button[normalize-space(.)='Publication Title']")
+            )
+        )
+        # 이미 펼쳐져 있지 않으면 클릭
+        aria_exp = pub_btn.get_attribute('aria-expanded')
+        if aria_exp != 'true':
+            driver.execute_script('arguments[0].click();', pub_btn)
+            time.sleep(2)
+            print('[OK] Publication Title 섹션 펼침')
+
+        # 섹션 내 검색 입력창
+        search_input = WebDriverWait(driver, 10).until(
             EC.presence_of_element_located(
                 (By.XPATH,
-                 '//xpl-facet-publication-title | //div[contains(@class, "facet-publication")]')
+                 "//button[normalize-space(.)='Publication Title']"
+                 "/following::input[@type='text' or @type='search'][1]")
             )
         )
-
-        search_input = pub_section.find_element(By.CSS_SELECTOR, "input[type='text']")
         search_input.clear()
-        search_input.send_keys(journal_name)
-        time.sleep(2)
+        search_input.send_keys(journal_name[:20])  # 앞 20자만 입력
+        time.sleep(3)
 
-        checkbox = WebDriverWait(pub_section, 10).until(
+        # 해당 저널 체크박스 레이블 클릭
+        label = WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable(
-                (By.XPATH, f".//label[contains(normalize-space(), '{journal_name}')]")
+                (By.XPATH,
+                 f"//label[contains(normalize-space(), 'Geoscience and Remote Sensing')]"
+                 f"[not(contains(normalize-space(), 'Letters'))]")
             )
         )
-        checkbox.click()
-        print(f'[OK] 저널 필터 적용: {journal_name}')
+        driver.execute_script('arguments[0].click();', label)
+        print(f'[OK] 저널 필터 적용: {label.text[:60]}')
         time.sleep(5)
         return True
 
     except Exception as e:
-        print(f'[오류] 저널 필터 적용 실패: {e}')
+        print(f'[경고] 저널 필터 적용 실패 (계속 진행): {e}')
         return False
 
 
@@ -365,12 +440,16 @@ def set_items_per_page(driver, items=10):
 # ==================== 페이지 처리 ====================
 def select_all_results(driver):
     try:
+        # IEEE Xplore 결과 페이지의 "Select All on Page" 체크박스
+        # class="xpl-checkbox-default results-actions-selectall-checkbox ..."
         select_all = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, "input[aria-label*='Select all']"))
+            EC.presence_of_element_located(
+                (By.CSS_SELECTOR, "input.results-actions-selectall-checkbox")
+            )
         )
         if not select_all.is_selected():
             driver.execute_script('arguments[0].click();', select_all)
-            print('[OK] 전체 선택')
+            print('[OK] Select All on Page 클릭')
             time.sleep(2)
         return True
     except Exception as e:
@@ -378,39 +457,51 @@ def select_all_results(driver):
         return False
 
 
-def trigger_download(driver, config):
+def trigger_download(driver, config, page_number=1):
     try:
-        download_btn = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Download')]"))
-        )
-        download_btn.click()
-        print('[OK] Download 버튼 클릭')
-        time.sleep(3)
+        save_dir = Path(config.SAVE_PATH)
+        # 다운로드 전 기존 파일 목록 기록 (.crdownload 포함)
+        existing = set(f.name for f in save_dir.iterdir() if f.is_file())
 
-        pdf_option = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH, "//label[contains(text(), 'PDF')]"))
+        # 1) "Download PDFs" 버튼 클릭 (결과 목록 상단 액션 버튼)
+        dl_btn = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located(
+                (By.XPATH, "//button[contains(text(), 'Download PDFs')]")
+            )
         )
-        pdf_option.click()
-        print('[OK] PDF 옵션 선택')
-        time.sleep(2)
+        driver.execute_script('arguments[0].click();', dl_btn)
+        print('[OK] Download PDFs 클릭')
+        time.sleep(5)
 
+        # 2) 모달 내 "Download" 확인 버튼 (class: stats-SearchResults_BulkPDFDownload)
         confirm_btn = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Download')]"))
+            EC.presence_of_element_located(
+                (By.XPATH,
+                 "//button[normalize-space(.)='Download' "
+                 "or contains(@class,'stats-SearchResults_BulkPDFDownload')]")
+            )
         )
-        confirm_btn.click()
-        print('[OK] 다운로드 확인')
+        driver.execute_script('arguments[0].click();', confirm_btn)
+        print('[OK] 다운로드 확인 클릭')
 
+        # 3) 새로 나타난 파일(zip 또는 pdf)이 저장 폴더에 나타날 때까지 대기
         print(f'[대기] 다운로드 중... (최대 {config.DOWNLOAD_WAIT_SECONDS}초)')
         start_time = time.time()
         while time.time() - start_time < config.DOWNLOAD_WAIT_SECONDS:
-            if driver.find_elements(By.CSS_SELECTOR, "button[aria-label='Close']"):
-                print('[OK] 다운로드 완료 감지')
-                break
+            for f in save_dir.iterdir():
+                if f.name in existing:
+                    continue  # 이미 있던 파일 무시
+                if f.suffix in ('.zip', '.pdf') and not f.name.endswith('.crdownload'):
+                    # 페이지 번호를 붙여 파일명 변경 (덮어쓰기 방지)
+                    new_name = save_dir / f'page_{page_number:03d}_{f.name}'
+                    f.rename(new_name)
+                    sz = new_name.stat().st_size
+                    print(f'[OK] 다운로드 완료: {new_name.name}  ({sz // 1024} KB)')
+                    return True
             time.sleep(5)
 
-        driver.execute_script('window.scrollTo(0, document.body.scrollHeight);')
-        time.sleep(2)
-        return True
+        print('[경고] 다운로드 타임아웃')
+        return False
 
     except Exception as e:
         print(f'[오류] 다운로드 실패: {e}')
@@ -434,7 +525,7 @@ def process_current_page(driver, page_number, config):
         try:
             if not select_all_results(driver):
                 continue
-            if not trigger_download(driver, config):
+            if not trigger_download(driver, config, page_number):
                 continue
 
             print(f'[OK] 페이지 {page_number} 완료')
@@ -517,10 +608,10 @@ def crawl_year(year, username, password, save_base_path, headless=False):
             raise Exception('Advanced Search 실패')
 
         if not apply_publication_filter(driver, config.TARGET_JOURNAL):
-            raise Exception('저널 필터 실패')
+            print('[경고] 저널 필터 건너뜀 - 전체 연도 결과로 진행')
 
         if not set_items_per_page(driver, 10):
-            raise Exception('Items per page 실패')
+            print('[경고] Items per page 설정 건너뜀 - 기본값으로 진행')
 
         current_page = config.START_PAGE
         visited_pages = 0
