@@ -32,6 +32,8 @@ import random
 import platform
 import argparse
 import warnings
+import traceback
+from datetime import datetime
 from pathlib import Path
 
 from selenium import webdriver
@@ -43,6 +45,38 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 
 warnings.filterwarnings('ignore')
+
+
+# ==================== 로거 (headless 전용) ====================
+class TeeLogger:
+    """stdout 출력을 콘솔과 로그 파일에 동시에 기록"""
+
+    def __init__(self, log_path):
+        self.terminal = sys.stdout
+        self.log_file = open(log_path, 'a', encoding='utf-8', buffering=1)
+
+    def write(self, message):
+        self.terminal.write(message)
+        self.log_file.write(message)
+
+    def flush(self):
+        self.terminal.flush()
+        self.log_file.flush()
+
+    def close(self):
+        self.log_file.close()
+
+
+def setup_file_logger(save_base_path, year):
+    """headless 실행 시 로그 디렉토리/파일 생성, TeeLogger 반환"""
+    log_dir = Path(str(save_base_path) + '_logs') / str(year)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_path = log_dir / f'crawl_{year}_{ts}.log'
+    logger = TeeLogger(str(log_path))
+    print(f'[LOG] 로그 파일: {log_path}')
+    return logger
+
 
 # ==================== 기본 저장 경로 ====================
 DEFAULT_SAVE_PATH_LINUX   = '/nas1/hyperspectral_literature_data_collected/01_IEEE_TGRS_1980_2025'
@@ -606,8 +640,16 @@ def go_to_next_page(driver, current_page, config):
 
 # ==================== 단일 연도 크롤링 ====================
 def crawl_year(year, username, password, save_base_path, headless=False):
+    # headless 모드일 때만 파일 로그 활성화
+    logger = None
+    orig_stdout = sys.stdout
+    if headless:
+        logger = setup_file_logger(save_base_path, year)
+        sys.stdout = logger
+
+    start_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f"\n{'='*60}")
-    print(f'{year}년 IEEE TGRS 논문 크롤링 시작')
+    print(f'{year}년 IEEE TGRS 논문 크롤링 시작  [{start_ts}]')
     print(f"{'='*60}\n")
 
     config = CrawlConfig(year, save_base_path)
@@ -647,18 +689,24 @@ def crawl_year(year, username, password, save_base_path, headless=False):
                 break
             current_page = next_page
 
+        end_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         print(f"\n{'='*60}")
         print(f'{year}년 크롤링 완료!  저장 경로: {config.SAVE_PATH}')
+        print(f'종료 시각: {end_ts}')
         print(f"{'='*60}\n")
 
     except KeyboardInterrupt:
-        print(f'\n[중단] 사용자가 중단했습니다.')
+        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        print(f'\n[INTERRUPTED] 사용자 중단  [{ts}]  (페이지 {current_page if "current_page" in dir() else "?"}까지 완료)')
     except Exception as e:
-        print(f'\n[오류] {year}년 크롤링 실패: {e}')
-        import traceback
+        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        print(f'\n[ERROR] {year}년 크롤링 실패  [{ts}]: {e}')
         traceback.print_exc()
     finally:
         driver.quit()
+        if logger:
+            sys.stdout = orig_stdout
+            logger.close()
 
 
 # ==================== credentials.json 로드 ====================
@@ -758,7 +806,7 @@ def main():
 
     for year in years:
         print(f"\n{'#'*60}")
-        print(f'# {year}년 크롤링 시작')
+        print(f'# {year}년 크롤링 시작  [{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}]')
         print(f"{'#'*60}\n")
 
         try:
@@ -772,7 +820,7 @@ def main():
             time.sleep(30)
 
     print(f"\n{'#'*60}")
-    print('# 모든 연도 크롤링 완료!')
+    print(f'# 모든 연도 크롤링 완료!  [{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}]')
     print(f"{'#'*60}")
 
 
