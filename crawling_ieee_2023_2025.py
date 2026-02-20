@@ -651,6 +651,7 @@ def crawl_year(year, username, password, save_base_path, headless=False):
 
     config = CrawlConfig(year, save_base_path)
     driver = setup_chrome_driver(config.SAVE_PATH, headless=headless)
+    current_page = config.START_PAGE  # KeyboardInterrupt 핸들러에서 접근 가능하도록 미리 초기화
 
     try:
         if not login_kookmin_library(driver, username, password):
@@ -668,7 +669,6 @@ def crawl_year(year, username, password, save_base_path, headless=False):
         if not set_items_per_page(driver, 10):
             print('[경고] Items per page 설정 건너뜀 - 기본값으로 진행')
 
-        current_page = config.START_PAGE
         visited_pages = 0
 
         while visited_pages < config.MAX_PAGE_VISITS:
@@ -694,7 +694,7 @@ def crawl_year(year, username, password, save_base_path, headless=False):
 
     except KeyboardInterrupt:
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        print(f'\n[INTERRUPTED] 사용자 중단  [{ts}]  (페이지 {current_page if "current_page" in dir() else "?"}까지 완료)')
+        print(f'\n[INTERRUPTED] 사용자 중단  [{ts}]  (페이지 {current_page}까지 완료)')
     except Exception as e:
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         print(f'\n[ERROR] {year}년 크롤링 실패  [{ts}]: {e}')
