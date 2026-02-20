@@ -33,6 +33,7 @@ import platform
 import argparse
 import warnings
 import traceback
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -507,6 +508,45 @@ def select_all_results(driver):
         return False
 
 
+def unzip_and_cleanup(zip_path, save_dir):
+    """zip 파일에서 PDF만 추출 후 zip 삭제. 크롬 임시파일도 정리."""
+    save_dir = Path(save_dir)
+    zip_path = Path(zip_path)
+    extracted = 0
+    skipped   = 0
+
+    try:
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            for member in zf.namelist():
+                if not member.lower().endswith('.pdf'):
+                    continue
+                filename = Path(member).name   # 디렉토리 구조 무시, 파일명만 사용
+                target = save_dir / filename
+                if target.exists():
+                    skipped += 1
+                    continue
+                with zf.open(member) as src, open(target, 'wb') as dst:
+                    dst.write(src.read())
+                extracted += 1
+                print(f'  [압축해제] {filename}')
+
+        print(f'[OK] PDF 추출: {extracted}개  (중복 건너뜀: {skipped}개)')
+        zip_path.unlink()
+        print(f'[OK] zip 삭제: {zip_path.name}')
+
+    except Exception as e:
+        print(f'[경고] 압축 해제 실패: {e}')
+
+    # 크롬 임시 파일 정리 (.crdownload, .com.google.Chrome.*)
+    for tmp in save_dir.iterdir():
+        if tmp.name.endswith('.crdownload') or tmp.name.startswith('.com.google.Chrome'):
+            try:
+                tmp.unlink()
+                print(f'[OK] 임시파일 삭제: {tmp.name}')
+            except Exception:
+                pass
+
+
 def trigger_download(driver, config, page_number=1):
     try:
         save_dir = Path(config.SAVE_PATH)
@@ -544,6 +584,8 @@ def trigger_download(driver, config, page_number=1):
                 if f.suffix in ('.zip', '.pdf') and not f.name.endswith('.crdownload'):
                     sz = f.stat().st_size
                     print(f'[OK] 다운로드 완료: {f.name}  (페이지 {page_number}, {sz // 1024} KB)')
+                    if f.suffix == '.zip':
+                        unzip_and_cleanup(f, save_dir)
                     return True
             time.sleep(5)
 
