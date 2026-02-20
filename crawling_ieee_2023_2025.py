@@ -542,11 +542,8 @@ def trigger_download(driver, config, page_number=1):
                 if f.name in existing:
                     continue  # 이미 있던 파일 무시
                 if f.suffix in ('.zip', '.pdf') and not f.name.endswith('.crdownload'):
-                    # 페이지 번호를 붙여 파일명 변경 (덮어쓰기 방지)
-                    new_name = save_dir / f'page_{page_number:03d}_{f.name}'
-                    f.rename(new_name)
-                    sz = new_name.stat().st_size
-                    print(f'[OK] 다운로드 완료: {new_name.name}  ({sz // 1024} KB)')
+                    sz = f.stat().st_size
+                    print(f'[OK] 다운로드 완료: {f.name}  (페이지 {page_number}, {sz // 1024} KB)')
                     return True
             time.sleep(5)
 
