@@ -149,8 +149,30 @@ python tiktoken/scripts/json_token_counter.py "파일.json"
 
 ---
 
+## 변경 이력
+
+### 페이지네이션 수정 (`locate_next_arrow`)
+- IEEE Xplore는 1–10페이지만 번호 버튼(`stats-Pagination_N`)을 표시하고, 11페이지부터는 `>` 화살표 버튼으로만 이동 가능
+- 기존: 11페이지 버튼을 못 찾으면 크롤링 종료 → **최대 10페이지(약 100편)만 다운로드**
+- 수정: `locate_next_arrow()` 추가. 번호 버튼이 없으면 `>` / `Next` 화살표 버튼을 클릭하여 다음 페이지 이동
+
+### 세션 재사용 수정 (`_do_year_crawl`)
+- 기존: 연도마다 Chrome 드라이버를 새로 만들고 도서관 로그인을 반복
+- 수정: 드라이버와 로그인 세션을 1회만 생성하고, 연도 전환 시 `Page.setDownloadBehavior` CDP 명령으로 다운로드 경로만 변경
+- 효과: 연도 간 전환이 빨라지고, 불필요한 로그인 트래픽 제거
+
+### 기타 수정 이력
+- 다운로드 후 zip 자동 압축 해제 및 PDF 추출 (`zipfile` 모듈)
+- 복수 파일 동시 다운로드 팝업 차단 해제 (`automatic_downloads: 1`)
+- 리눅스 서버 Headless 실행 시 연도별 로그 파일 생성 (`{저장경로}_logs/{연도}/crawl_*.log`)
+- 저널 필터 DOM 경로 수정 (Publication Title 섹션 XPath 확정)
+- NAS 파일시스템 Permission denied 우회 (파일 rename 제거)
+
+---
+
 ## 참고사항
 
 - `credentials.json`은 `.gitignore`에 포함 → 절대 커밋되지 않음
 - IEEE Seat Limit 발생 시 스크립트가 자동으로 5분 대기 후 재시도
 - `webdriver-manager` 설치 시 ChromeDriver 버전 자동 관리
+- 리눅스 서버에 Chrome 145가 수동 설치된 경우 자동 감지 (`/data/khkim/chrome_local/...`)

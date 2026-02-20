@@ -706,30 +706,21 @@ def go_to_next_page(driver, current_page, config):
 
 
 # ==================== 단일 연도 크롤링 ====================
-def crawl_year(year, username, password, save_base_path, headless=False):
-    # headless 모드일 때만 파일 로그 활성화
-    logger = None
-    orig_stdout = sys.stdout
-    if headless:
-        logger = setup_file_logger(save_base_path, year)
-        sys.stdout = logger
+def _do_year_crawl(driver, year, config):
+    """단일 연도의 크롤링 내부 루프.
 
-    start_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    print(f"\n{'='*60}")
-    print(f'{year}년 IEEE TGRS 논문 크롤링 시작  [{start_ts}]')
-    print(f"{'='*60}\n")
+    로그인·IEEE 접속이 완료된 driver를 받아 검색→필터→다운로드를 수행한다.
+    예외는 출력 후 re-raise하여 호출자가 정리하게 한다.
+    """
+    # CDP로 해당 연도 다운로드 경로 변경 (드라이버 재생성 없이 경로만 교체)
+    driver.execute_cdp_cmd('Page.setDownloadBehavior', {
+        'behavior': 'allow',
+        'downloadPath': str(config.SAVE_PATH),
+    })
 
-    config = CrawlConfig(year, save_base_path)
-    driver = setup_chrome_driver(config.SAVE_PATH, headless=headless)
-    current_page = config.START_PAGE  # KeyboardInterrupt 핸들러에서 접근 가능하도록 미리 초기화
+    current_page = config.START_PAGE
 
     try:
-        if not login_kookmin_library(driver, username, password):
-            raise Exception('도서관 로그인 실패')
-
-        if not access_ieee_via_library(driver):
-            raise Exception('IEEE 접속 실패')
-
         if not setup_ieee_advanced_search(driver, year):
             raise Exception('Advanced Search 실패')
 
@@ -765,10 +756,42 @@ def crawl_year(year, username, password, save_base_path, headless=False):
     except KeyboardInterrupt:
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         print(f'\n[INTERRUPTED] 사용자 중단  [{ts}]  (페이지 {current_page}까지 완료)')
+        raise
     except Exception as e:
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         print(f'\n[ERROR] {year}년 크롤링 실패  [{ts}]: {e}')
         traceback.print_exc()
+        raise
+
+
+def crawl_year(year, username, password, save_base_path, headless=False):
+    """단일 연도 크롤링 (드라이버 생성·로그인 포함). 단독 실행 또는 외부 호출용."""
+    logger = None
+    orig_stdout = sys.stdout
+    if headless:
+        logger = setup_file_logger(save_base_path, year)
+        sys.stdout = logger
+
+    start_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    print(f"\n{'='*60}")
+    print(f'{year}년 IEEE TGRS 논문 크롤링 시작  [{start_ts}]')
+    print(f"{'='*60}\n")
+
+    config = CrawlConfig(year, save_base_path)
+    driver = setup_chrome_driver(str(config.SAVE_PATH), headless=headless)
+
+    try:
+        if not login_kookmin_library(driver, username, password):
+            print(f'\n[ERROR] {year}년: 도서관 로그인 실패')
+            return
+        if not access_ieee_via_library(driver):
+            print(f'\n[ERROR] {year}년: IEEE 접속 실패')
+            return
+        _do_year_crawl(driver, year, config)
+    except KeyboardInterrupt:
+        pass  # _do_year_crawl 에서 이미 출력
+    except Exception:
+        pass  # _do_year_crawl 에서 이미 출력
     finally:
         driver.quit()
         if logger:
@@ -871,20 +894,55 @@ def main():
     print(f'  로그인 ID   : {username}')
     print('='*60 + '\n')
 
-    for year in years:
-        print(f"\n{'#'*60}")
-        print(f'# {year}년 크롤링 시작  [{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}]')
-        print(f"{'#'*60}\n")
+    # 드라이버 1회 생성 → 로그인 1회 → 연도별 루프 (연도마다 재로그인 불필요)
+    first_config = CrawlConfig(years[0], save_base_path)
+    driver = setup_chrome_driver(str(first_config.SAVE_PATH), headless=args.headless)
 
-        try:
-            crawl_year(year, username, password, save_base_path, headless=args.headless)
-        except Exception as e:
-            print(f'[오류] {year}년 크롤링 실패: {e}')
-            continue
+    try:
+        if not login_kookmin_library(driver, username, password):
+            print('[오류] 도서관 로그인 실패')
+            return
+        if not access_ieee_via_library(driver):
+            print('[오류] IEEE 접속 실패')
+            return
 
-        if year != years[-1]:
-            print('\n[대기] 다음 연도 전 30초 대기...')
-            time.sleep(30)
+        for year in years:
+            print(f"\n{'#'*60}")
+            print(f'# {year}년 크롤링 시작  [{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}]')
+            print(f"{'#'*60}\n")
+
+            config = CrawlConfig(year, save_base_path)
+
+            # headless 모드 - 연도별 로그 파일 설정
+            logger = None
+            orig_stdout = sys.stdout
+            if args.headless:
+                logger = setup_file_logger(save_base_path, year)
+                sys.stdout = logger
+
+            interrupted = False
+            try:
+                _do_year_crawl(driver, year, config)
+            except KeyboardInterrupt:
+                interrupted = True
+            except Exception:
+                pass  # _do_year_crawl 에서 이미 출력
+            finally:
+                if logger:
+                    sys.stdout = orig_stdout
+                    logger.close()
+
+            if interrupted:
+                break
+
+            if year != years[-1]:
+                print('\n[대기] 다음 연도 전 30초 대기...')
+                time.sleep(30)
+
+    except KeyboardInterrupt:
+        print('[INTERRUPTED] 사용자 중단')
+    finally:
+        driver.quit()
 
     print(f"\n{'#'*60}")
     print(f'# 모든 연도 크롤링 완료!  [{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}]')
