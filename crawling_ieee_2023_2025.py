@@ -115,6 +115,7 @@ class CrawlConfig:
         self.MAX_RANDOM_DELAY       = 8
         self.MAX_PAGE_VISITS        = 100
         self.MAX_SEAT_LIMIT_RETRIES = 5
+        self.MAX_PAGE_RETRIES       = 3   # 페이지 연속 실패 시 건너뜀 한계
 
         Path(self.SAVE_PATH).mkdir(parents=True, exist_ok=True)
         print(f"[저장 경로] {self.SAVE_PATH}")
@@ -577,17 +578,32 @@ def trigger_download(driver, config, page_number=1):
         # 3) 새로 나타난 파일(zip 또는 pdf)이 저장 폴더에 나타날 때까지 대기
         print(f'[대기] 다운로드 중... (최대 {config.DOWNLOAD_WAIT_SECONDS}초)')
         start_time = time.time()
+        download_started = False
         while time.time() - start_time < config.DOWNLOAD_WAIT_SECONDS:
             for f in save_dir.iterdir():
-                if f.name in existing:
+                if not f.is_file() or f.name in existing:
                     continue  # 이미 있던 파일 무시
+                # 완료된 파일 감지
                 if f.suffix in ('.zip', '.pdf') and not f.name.endswith('.crdownload'):
                     sz = f.stat().st_size
                     print(f'[OK] 다운로드 완료: {f.name}  (페이지 {page_number}, {sz // 1024} KB)')
                     if f.suffix == '.zip':
                         unzip_and_cleanup(f, save_dir)
                     return True
+                # 진행 중인 파일 감지 (.crdownload)
+                if f.name.endswith('.crdownload') and not download_started:
+                    download_started = True
+                    print(f'[진행] 다운로드 시작 감지: {f.name}')
             time.sleep(5)
+
+        # 타임아웃 - 미완료 crdownload 파일 정리
+        for f in save_dir.iterdir():
+            if f.is_file() and f.name not in existing and f.name.endswith('.crdownload'):
+                try:
+                    f.unlink()
+                    print(f'[정리] 미완료 임시파일 삭제: {f.name}')
+                except Exception:
+                    pass
 
         print('[경고] 다운로드 타임아웃')
         return False
@@ -713,10 +729,20 @@ def _do_year_crawl(driver, year, config):
     예외는 출력 후 re-raise하여 호출자가 정리하게 한다.
     """
     # CDP로 해당 연도 다운로드 경로 변경 (드라이버 재생성 없이 경로만 교체)
-    driver.execute_cdp_cmd('Page.setDownloadBehavior', {
-        'behavior': 'allow',
-        'downloadPath': str(config.SAVE_PATH),
-    })
+    # Browser.setDownloadBehavior가 신규 Chrome에서 더 안정적; Page 버전으로 fallback
+    try:
+        driver.execute_cdp_cmd('Browser.setDownloadBehavior', {
+            'behavior': 'allow',
+            'downloadPath': str(config.SAVE_PATH),
+            'eventsEnabled': True,
+        })
+        print(f'[CDP] 다운로드 경로(Browser): {config.SAVE_PATH}')
+    except Exception:
+        driver.execute_cdp_cmd('Page.setDownloadBehavior', {
+            'behavior': 'allow',
+            'downloadPath': str(config.SAVE_PATH),
+        })
+        print(f'[CDP] 다운로드 경로(Page): {config.SAVE_PATH}')
 
     current_page = config.START_PAGE
 
@@ -731,15 +757,28 @@ def _do_year_crawl(driver, year, config):
             print('[경고] Items per page 설정 건너뜀 - 기본값으로 진행')
 
         visited_pages = 0
+        page_fail_count = {}  # 페이지별 연속 실패 횟수
 
         while visited_pages < config.MAX_PAGE_VISITS:
             success = process_current_page(driver, current_page, config)
 
             if not success:
-                print(f'[경고] 페이지 {current_page} 실패, 10분 대기 후 재시도')
-                time.sleep(600)
+                fails = page_fail_count.get(current_page, 0) + 1
+                page_fail_count[current_page] = fails
+                if fails >= config.MAX_PAGE_RETRIES:
+                    print(f'[경고] 페이지 {current_page} {fails}회 연속 실패 → 건너뜀')
+                    visited_pages += 1
+                    next_page = go_to_next_page(driver, current_page, config)
+                    if next_page is None:
+                        print(f'\n[완료] {year}년 모든 페이지 처리 완료!')
+                        break
+                    current_page = next_page
+                else:
+                    print(f'[경고] 페이지 {current_page} 실패 ({fails}/{config.MAX_PAGE_RETRIES}), 10분 대기 후 재시도')
+                    time.sleep(600)
                 continue
 
+            page_fail_count[current_page] = 0  # 성공 시 카운터 초기화
             visited_pages += 1
             next_page = go_to_next_page(driver, current_page, config)
             if next_page is None:
