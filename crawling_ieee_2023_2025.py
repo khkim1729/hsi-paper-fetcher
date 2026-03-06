@@ -472,21 +472,39 @@ def apply_publication_filter(driver, journal_name):
 def set_items_per_page(driver, items=10):
     print(f'5단계: 페이지당 {items}개 항목 설정')
 
-    try:
-        dropdown = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable(
-                (By.CSS_SELECTOR, "select[aria-label*='results per page']")
-            )
-        )
-        driver.execute_script(f"arguments[0].value = '{items}';", dropdown)
-        driver.execute_script("arguments[0].dispatchEvent(new Event('change'));", dropdown)
-        print(f'[OK] 페이지당 {items}개 설정')
-        time.sleep(5)
-        return True
+    SELECTORS = [
+        "select[aria-label*='results per page']",
+        "select[aria-label*='Results per page']",
+        "select[aria-label*='per page']",
+        "select.results-per-page",
+    ]
 
-    except Exception as e:
-        print(f'[오류] Items per page 설정 실패: {e}')
-        return False
+    for attempt in range(3):
+        try:
+            time.sleep(3)  # 필터 적용 후 페이지 리렌더링 대기
+            dropdown = None
+            for sel in SELECTORS:
+                els = driver.find_elements(By.CSS_SELECTOR, sel)
+                if els:
+                    dropdown = els[0]
+                    break
+
+            if dropdown is None:
+                raise Exception('드롭다운 요소 미발견')
+
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", dropdown)
+            time.sleep(1)
+            driver.execute_script(f"arguments[0].value = '{items}';", dropdown)
+            driver.execute_script("arguments[0].dispatchEvent(new Event('change'));", dropdown)
+            print(f'[OK] 페이지당 {items}개 설정')
+            time.sleep(5)
+            return True
+
+        except Exception as e:
+            print(f'[재시도 {attempt + 1}/3] Items per page 설정 실패: {e}')
+
+    print('[경고] Items per page 설정 최종 실패 → 기본값으로 진행')
+    return False
 
 
 # ==================== 페이지 처리 ====================
