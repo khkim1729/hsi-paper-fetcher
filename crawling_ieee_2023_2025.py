@@ -25,6 +25,7 @@ IEEE TGRS 논문 크롤링 (2023-2025)
 """
 
 import os
+import re
 import sys
 import json
 import time
@@ -555,9 +556,9 @@ def select_all_results(driver):
                 time.sleep(2)
             return True
         except Exception as e:
-            print(f'[재시도 {attempt + 1}/3] 전체 선택 실패, 대기 후 재시도...')
+            print(f'[재시도 {attempt + 1}/3] 전체 선택 실패 ({type(e).__name__}: {str(e)[:80]})')
             time.sleep(10)  # Angular 렌더링 대기 (페이지 refresh 없이)
-    print('[오류] 전체 선택 3회 실패')
+    print(f'[오류] 전체 선택 3회 실패  현재 URL: {driver.current_url}')
     return False
 
 
@@ -606,42 +607,57 @@ def trigger_download(driver, config, page_number=1):
         # 다운로드 전 기존 파일 목록 기록 (.crdownload 포함)
         existing = set(f.name for f in save_dir.iterdir() if f.is_file())
 
-        # 1) "Download PDFs" 버튼 클릭 (결과 목록 상단 액션 버튼)
-        dl_btn = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located(
-                (By.XPATH, "//button[contains(text(), 'Download PDFs')]")
-            )
-        )
-        driver.execute_script('arguments[0].click();', dl_btn)
-        print('[OK] Download PDFs 클릭')
-        time.sleep(5)
+        # 이전 시도에서 남겨진 crdownload가 있으면 재클릭 없이 바로 모니터링
+        pre_existing_crdownload = None
+        for f in save_dir.iterdir():
+            if f.is_file() and f.name.endswith('.crdownload'):
+                pre_existing_crdownload = f
+                break
 
-        # 2) 모달 내 "Download" 확인 버튼 (class: stats-SearchResults_BulkPDFDownload)
-        confirm_btn = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located(
-                (By.XPATH,
-                 "//button[normalize-space(.)='Download' "
-                 "or contains(@class,'stats-SearchResults_BulkPDFDownload')]")
+        if pre_existing_crdownload:
+            print(f'[재개] 기존 crdownload 감지: {pre_existing_crdownload.name}  → 다운로드 버튼 생략')
+            download_started = True
+            crdownload_path = pre_existing_crdownload
+            crdownload_last_size = crdownload_path.stat().st_size if crdownload_path.exists() else -1
+            crdownload_last_change = time.time()
+            download_deadline = time.time() + 600
+        else:
+            # 1) "Download PDFs" 버튼 클릭 (결과 목록 상단 액션 버튼)
+            dl_btn = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located(
+                    (By.XPATH, "//button[contains(text(), 'Download PDFs')]")
+                )
             )
-        )
-        driver.execute_script('arguments[0].click();', confirm_btn)
-        print('[OK] 다운로드 확인 클릭')
+            driver.execute_script('arguments[0].click();', dl_btn)
+            print('[OK] Download PDFs 클릭')
+            time.sleep(5)
+
+            # 2) 모달 내 "Download" 확인 버튼 (class: stats-SearchResults_BulkPDFDownload)
+            confirm_btn = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located(
+                    (By.XPATH,
+                     "//button[normalize-space(.)='Download' "
+                     "or contains(@class,'stats-SearchResults_BulkPDFDownload')]")
+                )
+            )
+            driver.execute_script('arguments[0].click();', confirm_btn)
+            print('[OK] 다운로드 확인 클릭')
+
+            download_started = False
+            crdownload_path = None
+            crdownload_last_size = -1
+            crdownload_last_change = None
+            download_deadline = time.time() + config.DOWNLOAD_WAIT_SECONDS
 
         # 3) 새로 나타난 파일(zip 또는 pdf)이 저장 폴더에 나타날 때까지 대기
         print(f'[대기] 다운로드 중... (최대 {config.DOWNLOAD_WAIT_SECONDS}초, crdownload 감지 시 +600초)')
-        start_time = time.time()
-        download_started = False
-        download_deadline = start_time + config.DOWNLOAD_WAIT_SECONDS
-        crdownload_path = None
-        crdownload_last_size = -1
-        crdownload_last_change = None
         STALL_TIMEOUT = 90  # 크기 변화 없으면 stall 판정 (초)
         while time.time() < download_deadline:
             for f in save_dir.iterdir():
-                if not f.is_file() or f.name in existing:
-                    continue  # 이미 있던 파일 무시
-                # 완료된 파일 감지
-                if f.suffix in ('.zip', '.pdf') and not f.name.endswith('.crdownload'):
+                if not f.is_file():
+                    continue
+                # 완료된 파일 감지 (새로 나타난 zip/pdf)
+                if f.suffix in ('.zip', '.pdf') and not f.name.endswith('.crdownload') and f.name not in existing:
                     sz = f.stat().st_size
                     print(f'[OK] 다운로드 완료: {f.name}  (페이지 {page_number}, {sz // 1024} KB)')
                     if f.suffix == '.zip':
@@ -668,16 +684,12 @@ def trigger_download(driver, config, page_number=1):
 
             time.sleep(10)
 
-        # 타임아웃 - 미완료 crdownload 파일 정리
-        for f in save_dir.iterdir():
-            if f.is_file() and f.name not in existing and f.name.endswith('.crdownload'):
-                try:
-                    f.unlink()
-                    print(f'[정리] 미완료 임시파일 삭제: {f.name}')
-                except Exception:
-                    pass
-
-        print('[경고] 다운로드 타임아웃')
+        # 타임아웃 - crdownload는 삭제하지 않음 (Linux에서 Chrome이 계속 쓰고 있을 수 있음)
+        if crdownload_path and crdownload_path.exists():
+            sz = crdownload_path.stat().st_size
+            print(f'[경고] 다운로드 타임아웃  {crdownload_path.name}: {sz // 1024} KB (파일 유지)')
+        else:
+            print('[경고] 다운로드 타임아웃')
         return False
 
     except Exception as e:
@@ -760,11 +772,34 @@ def go_to_next_page(driver, current_page, config):
         time.sleep(5)
 
     next_page = current_page + 1
+
+    # ── 1순위: 저장된 기준 URL로 pageNumber만 바꿔 직접 이동 ──────────────
+    # 버튼 클릭 방식은 Angular 라우팅으로 처리되어 모달/필터/pageSize가 유실될 수 있음
+    base_url = getattr(config, 'base_search_url', None)
+    if base_url:
+        try:
+            if 'pageNumber=' in base_url:
+                new_url = re.sub(r'pageNumber=\d+', f'pageNumber={next_page}', base_url)
+            else:
+                sep = '&' if '?' in base_url else '?'
+                new_url = base_url + sep + f'pageNumber={next_page}'
+
+            driver.get(new_url)
+            print(f'→ 페이지 {next_page} 이동 (URL 직접)')
+            WebDriverWait(driver, 20).until(
+                lambda d: d.execute_script('return document.readyState') == 'complete'
+            )
+            driver.execute_script('window.scrollTo(0, 0);')
+            time.sleep(8)
+            return next_page
+        except Exception as e:
+            print(f'[경고] URL 직접 이동 실패: {e}  → 버튼 클릭 방식으로 폴백')
+
+    # ── 2순위: 기준 URL 없을 때 버튼 클릭 폴백 ───────────────────────────
     driver.execute_script('window.scrollTo(0, document.body.scrollHeight);')
     time.sleep(2)
 
     try:
-        # 번호 버튼 우선 시도 (timeout 단축), 없으면 '>' 화살표 사용
         try:
             btn = locate_page_button(driver, next_page, timeout=5)
         except TimeoutException:
@@ -777,7 +812,7 @@ def go_to_next_page(driver, current_page, config):
         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
         driver.execute_script('arguments[0].click();', btn)
 
-        print(f'→ 페이지 {next_page} 이동')
+        print(f'→ 페이지 {next_page} 이동 (버튼 클릭)')
         time.sleep(config.PAGE_CHANGE_DELAY)
         random_delay(1, 3)
 
@@ -785,7 +820,7 @@ def go_to_next_page(driver, current_page, config):
             lambda d: d.execute_script('return document.readyState') == 'complete'
         )
         driver.execute_script('window.scrollTo(0, 0);')
-        time.sleep(8)  # Angular 결과 렌더링 대기 (기존 2초 → 8초)
+        time.sleep(8)
         return next_page
 
     except Exception as e:
@@ -827,6 +862,10 @@ def _do_year_crawl(driver, year, config):
 
         if not set_items_per_page(driver, 10):
             print('[경고] Items per page 설정 건너뜀 - 기본값으로 진행')
+
+        # 필터+pageSize 확정 후 기준 URL 저장 (이후 페이지 이동 시 URL 직접 이동에 사용)
+        config.base_search_url = driver.current_url
+        print(f'[INFO] 기준 검색 URL 저장: {config.base_search_url}')
 
         visited_pages = 0
         page_fail_count = {}  # 페이지별 연속 실패 횟수
