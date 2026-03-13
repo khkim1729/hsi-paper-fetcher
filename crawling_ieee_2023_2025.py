@@ -518,6 +518,21 @@ def set_items_per_page(driver, items=10):
         except Exception as e:
             print(f'[재시도 {attempt + 1}/3] Items per page 설정 실패: {e}')
 
+    # CSS selector 방식 모두 실패 → URL pageSize 파라미터로 fallback
+    # IEEE Xplore Angular 버전은 <select> 대신 커스텀 컴포넌트를 사용하는 경우가 있음
+    try:
+        cur = driver.current_url
+        if f'pageSize={items}' not in cur:
+            sep = '&' if '?' in cur else '?'
+            new_url = cur + sep + f'pageSize={items}&pageNumber=1'
+            print(f'[폴백] URL pageSize 파라미터 설정: {new_url}')
+            driver.get(new_url)
+            time.sleep(8)
+            print(f'[OK] URL로 페이지당 {items}개 설정 완료')
+            return True
+    except Exception as e:
+        print(f'[경고] URL pageSize 설정 실패: {e}')
+
     print('[경고] Items per page 설정 최종 실패 → 기본값으로 진행')
     return False
 
@@ -617,6 +632,10 @@ def trigger_download(driver, config, page_number=1):
         start_time = time.time()
         download_started = False
         download_deadline = start_time + config.DOWNLOAD_WAIT_SECONDS
+        crdownload_path = None
+        crdownload_last_size = -1
+        crdownload_last_change = None
+        STALL_TIMEOUT = 90  # 크기 변화 없으면 stall 판정 (초)
         while time.time() < download_deadline:
             for f in save_dir.iterdir():
                 if not f.is_file() or f.name in existing:
@@ -631,9 +650,23 @@ def trigger_download(driver, config, page_number=1):
                 # 진행 중인 파일 감지 (.crdownload) → 데드라인 600초 연장
                 if f.name.endswith('.crdownload') and not download_started:
                     download_started = True
+                    crdownload_path = f
+                    crdownload_last_change = time.time()
                     download_deadline = time.time() + 600
                     print(f'[진행] 다운로드 시작 감지: {f.name}  (최대 600초 추가 대기)')
-            time.sleep(5)
+
+            # crdownload 크기 모니터링 (stall 감지)
+            if crdownload_path and crdownload_path.exists():
+                cur_size = crdownload_path.stat().st_size
+                if cur_size != crdownload_last_size:
+                    crdownload_last_size = cur_size
+                    crdownload_last_change = time.time()
+                    print(f'[진행중] {crdownload_path.name}: {cur_size // 1024} KB')
+                elif crdownload_last_change and (time.time() - crdownload_last_change) > STALL_TIMEOUT:
+                    print(f'[경고] 다운로드 stall 감지 ({STALL_TIMEOUT}초간 크기 변화 없음) → 재시도')
+                    break
+
+            time.sleep(10)
 
         # 타임아웃 - 미완료 crdownload 파일 정리
         for f in save_dir.iterdir():
