@@ -402,8 +402,23 @@ def setup_ieee_advanced_search(driver, year):
         return True
 
     except Exception as e:
-        print(f'[오류] Advanced Search 설정 실패: {e}')
-        return False
+        print(f'[오류] Advanced Search 폼 실패: {e}')
+        # 폴백: 연도 파라미터 포함 검색결과 URL 직접 이동
+        try:
+            cur = driver.current_url
+            base = cur.split('/search')[0] if '/search' in cur else \
+                   cur.split('/Xplore')[0] if '/Xplore' in cur else \
+                   'https://ieeexplore-ieee-org-ssl.proxy.kookmin.ac.kr'
+            fallback_url = (f'{base}/search/searchresult.jsp'
+                            f'?action=search&newsearch=true&ranges={year}_{year}_Year')
+            print(f'[폴백] URL 직접 이동: {fallback_url}')
+            driver.get(fallback_url)
+            time.sleep(10)
+            print(f'[폴백] 현재 URL: {driver.current_url}')
+            return True
+        except Exception as e2:
+            print(f'[오류] Advanced Search 폴백도 실패: {e2}')
+            return False
 
 
 # ==================== 4단계: Publication 필터 ====================
@@ -509,22 +524,26 @@ def set_items_per_page(driver, items=10):
 
 # ==================== 페이지 처리 ====================
 def select_all_results(driver):
-    try:
-        # IEEE Xplore 결과 페이지의 "Select All on Page" 체크박스
-        # class="xpl-checkbox-default results-actions-selectall-checkbox ..."
-        select_all = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located(
-                (By.CSS_SELECTOR, "input.results-actions-selectall-checkbox")
+    for attempt in range(3):
+        try:
+            # 페이지 로딩 대기 (Angular 렌더링 시간 확보)
+            select_all = WebDriverWait(driver, 20).until(
+                EC.presence_of_element_located(
+                    (By.CSS_SELECTOR, "input.results-actions-selectall-checkbox")
+                )
             )
-        )
-        if not select_all.is_selected():
-            driver.execute_script('arguments[0].click();', select_all)
-            print('[OK] Select All on Page 클릭')
-            time.sleep(2)
-        return True
-    except Exception as e:
-        print(f'[오류] 전체 선택 실패: {e}')
-        return False
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", select_all)
+            time.sleep(1)
+            if not select_all.is_selected():
+                driver.execute_script('arguments[0].click();', select_all)
+                print('[OK] Select All on Page 클릭')
+                time.sleep(2)
+            return True
+        except Exception as e:
+            print(f'[재시도 {attempt + 1}/3] 전체 선택 실패, 대기 후 재시도...')
+            time.sleep(10)  # Angular 렌더링 대기 (페이지 refresh 없이)
+    print('[오류] 전체 선택 3회 실패')
+    return False
 
 
 def unzip_and_cleanup(zip_path, save_dir):
@@ -594,10 +613,11 @@ def trigger_download(driver, config, page_number=1):
         print('[OK] 다운로드 확인 클릭')
 
         # 3) 새로 나타난 파일(zip 또는 pdf)이 저장 폴더에 나타날 때까지 대기
-        print(f'[대기] 다운로드 중... (최대 {config.DOWNLOAD_WAIT_SECONDS}초)')
+        print(f'[대기] 다운로드 중... (최대 {config.DOWNLOAD_WAIT_SECONDS}초, crdownload 감지 시 +600초)')
         start_time = time.time()
         download_started = False
-        while time.time() - start_time < config.DOWNLOAD_WAIT_SECONDS:
+        download_deadline = start_time + config.DOWNLOAD_WAIT_SECONDS
+        while time.time() < download_deadline:
             for f in save_dir.iterdir():
                 if not f.is_file() or f.name in existing:
                     continue  # 이미 있던 파일 무시
@@ -608,10 +628,11 @@ def trigger_download(driver, config, page_number=1):
                     if f.suffix == '.zip':
                         unzip_and_cleanup(f, save_dir)
                     return True
-                # 진행 중인 파일 감지 (.crdownload)
+                # 진행 중인 파일 감지 (.crdownload) → 데드라인 600초 연장
                 if f.name.endswith('.crdownload') and not download_started:
                     download_started = True
-                    print(f'[진행] 다운로드 시작 감지: {f.name}')
+                    download_deadline = time.time() + 600
+                    print(f'[진행] 다운로드 시작 감지: {f.name}  (최대 600초 추가 대기)')
             time.sleep(5)
 
         # 타임아웃 - 미완료 crdownload 파일 정리
@@ -731,7 +752,7 @@ def go_to_next_page(driver, current_page, config):
             lambda d: d.execute_script('return document.readyState') == 'complete'
         )
         driver.execute_script('window.scrollTo(0, 0);')
-        time.sleep(2)
+        time.sleep(8)  # Angular 결과 렌더링 대기 (기존 2초 → 8초)
         return next_page
 
     except Exception as e:
@@ -792,8 +813,8 @@ def _do_year_crawl(driver, year, config):
                         break
                     current_page = next_page
                 else:
-                    print(f'[경고] 페이지 {current_page} 실패 ({fails}/{config.MAX_PAGE_RETRIES}), 10분 대기 후 재시도')
-                    time.sleep(600)
+                    print(f'[경고] 페이지 {current_page} 실패 ({fails}/{config.MAX_PAGE_RETRIES}), 2분 대기 후 재시도')
+                    time.sleep(120)
                 continue
 
             page_fail_count[current_page] = 0  # 성공 시 카운터 초기화
