@@ -136,6 +136,22 @@ def setup_chrome_driver(download_dir, headless=False):
     """
     options = Options()
 
+    # Chrome 임시 프로필 디렉토리를 /tmp 대신 명시적 경로로 지정
+    # (서버에서 /tmp 가득 찼거나 권한 문제 시 "cannot create temp dir" 에러 방지)
+    chrome_tmp_dir = Path(download_dir).parent / '.chrome_profile'
+    chrome_tmp_dir.mkdir(parents=True, exist_ok=True)
+    # 이전 실행에서 남겨진 SingletonLock 제거 (없으면 다음 Chrome 기동이 "already in use"로 실패)
+    for lock in ['SingletonLock', 'SingletonCookie', 'SingletonSocket']:
+        lock_path = chrome_tmp_dir / lock
+        if lock_path.exists():
+            try:
+                lock_path.unlink()
+            except Exception:
+                pass
+    options.add_argument(f'--user-data-dir={chrome_tmp_dir}')
+    options.add_argument('--no-first-run')
+    options.add_argument('--no-default-browser-check')
+
     if headless:
         options.add_argument('--headless=new')
         options.add_argument('--disable-gpu')
@@ -223,6 +239,15 @@ def check_seat_limit(driver):
         text = driver.page_source.lower()
         return any(kw in text for kw in
                    ['seat limit', 'maximum number of users', 'too many users', 'access denied'])
+    except:
+        return False
+
+
+def is_session_expired(driver):
+    """프록시 세션 만료 여부 확인 (kookmin.ac.kr 세션 오류 페이지 감지)."""
+    try:
+        url = driver.current_url
+        return 'sessionfail' in url or 'exceptproc' in url
     except:
         return False
 
@@ -604,6 +629,15 @@ def unzip_and_cleanup(zip_path, save_dir):
 def trigger_download(driver, config, page_number=1):
     try:
         save_dir = Path(config.SAVE_PATH)
+
+        # 이전 trigger_download 호출에서 Chrome이 뒤늦게 완료시킨 zip 처리
+        for f in list(save_dir.iterdir()):
+            if f.is_file() and f.suffix == '.zip' and not f.name.endswith('.crdownload'):
+                sz = f.stat().st_size
+                print(f'[재개] 이전 시도 완료 zip 발견: {f.name} ({sz // 1024} KB) → 처리')
+                unzip_and_cleanup(f, save_dir)
+                return True
+
         # 다운로드 전 기존 파일 목록 기록 (.crdownload 포함)
         existing = set(f.name for f in save_dir.iterdir() if f.is_file())
 
@@ -651,7 +685,7 @@ def trigger_download(driver, config, page_number=1):
 
         # 3) 새로 나타난 파일(zip 또는 pdf)이 저장 폴더에 나타날 때까지 대기
         print(f'[대기] 다운로드 중... (최대 {config.DOWNLOAD_WAIT_SECONDS}초, crdownload 감지 시 +600초)')
-        STALL_TIMEOUT = 90  # 크기 변화 없으면 stall 판정 (초)
+        STALL_TIMEOUT = 300  # 크기 변화 없으면 stall 판정 (초) — 대용량 zip 완료 후 Chrome 재명 대기 포함
         while time.time() < download_deadline:
             for f in save_dir.iterdir():
                 if not f.is_file():
@@ -684,12 +718,28 @@ def trigger_download(driver, config, page_number=1):
 
             time.sleep(10)
 
-        # 타임아웃 - crdownload는 삭제하지 않음 (Linux에서 Chrome이 계속 쓰고 있을 수 있음)
+        # stall/타임아웃 후 Chrome이 rename을 완료했을 수 있음 → 60초 추가 확인
+        if crdownload_path:
+            sz = crdownload_path.stat().st_size if crdownload_path.exists() else 0
+            print(f'[대기] stall/타임아웃 후 60초 추가 zip 확인... (crdownload: {sz // 1024} KB)')
+        else:
+            print('[대기] 타임아웃 후 60초 추가 zip 확인...')
+        for _ in range(12):
+            time.sleep(5)
+            for f in save_dir.iterdir():
+                if (f.is_file() and f.suffix == '.zip'
+                        and not f.name.endswith('.crdownload')
+                        and f.name not in existing):
+                    sz = f.stat().st_size
+                    print(f'[OK] 다운로드 완료 (지연 감지): {f.name}  (페이지 {page_number}, {sz // 1024} KB)')
+                    unzip_and_cleanup(f, save_dir)
+                    return True
+
         if crdownload_path and crdownload_path.exists():
             sz = crdownload_path.stat().st_size
-            print(f'[경고] 다운로드 타임아웃  {crdownload_path.name}: {sz // 1024} KB (파일 유지)')
+            print(f'[경고] 다운로드 최종 타임아웃  {crdownload_path.name}: {sz // 1024} KB (파일 유지)')
         else:
-            print('[경고] 다운로드 타임아웃')
+            print('[경고] 다운로드 최종 타임아웃')
         return False
 
     except Exception as e:
@@ -829,7 +879,28 @@ def go_to_next_page(driver, current_page, config):
 
 
 # ==================== 단일 연도 크롤링 ====================
-def _do_year_crawl(driver, year, config):
+def _relogin_and_setup(driver, year, config, username, password):
+    """세션 만료 시 재로그인 후 검색 설정 복구. 성공하면 True."""
+    print('[재로그인] 프록시 세션 만료 → 재로그인 시도')
+    if not login_kookmin_library(driver, username, password):
+        print('[재로그인] 도서관 로그인 실패')
+        return False
+    if not access_ieee_via_library(driver):
+        print('[재로그인] IEEE 접속 실패')
+        return False
+    if not setup_ieee_advanced_search(driver, year):
+        print('[재로그인] Advanced Search 실패')
+        return False
+    if not apply_publication_filter(driver, config.TARGET_JOURNAL):
+        print('[재로그인] 저널 필터 건너뜀')
+    if not set_items_per_page(driver, 10):
+        print('[재로그인] Items per page 건너뜀')
+    config.base_search_url = driver.current_url
+    print(f'[재로그인] 복구 완료. 기준 URL: {config.base_search_url}')
+    return True
+
+
+def _do_year_crawl(driver, year, config, username, password):
     """단일 연도의 크롤링 내부 루프.
 
     로그인·IEEE 접속이 완료된 driver를 받아 검색→필터→다운로드를 수행한다.
@@ -857,20 +928,39 @@ def _do_year_crawl(driver, year, config):
         if not setup_ieee_advanced_search(driver, year):
             raise Exception('Advanced Search 실패')
 
-        if not apply_publication_filter(driver, config.TARGET_JOURNAL):
-            print('[경고] 저널 필터 건너뜀 - 전체 연도 결과로 진행')
+        # 세션 만료 감지 → 즉시 재로그인
+        if is_session_expired(driver):
+            if not _relogin_and_setup(driver, year, config, username, password):
+                raise Exception('재로그인 실패')
+        else:
+            if not apply_publication_filter(driver, config.TARGET_JOURNAL):
+                print('[경고] 저널 필터 건너뜀 - 전체 연도 결과로 진행')
 
-        if not set_items_per_page(driver, 10):
-            print('[경고] Items per page 설정 건너뜀 - 기본값으로 진행')
+            if not set_items_per_page(driver, 10):
+                print('[경고] Items per page 설정 건너뜀 - 기본값으로 진행')
 
-        # 필터+pageSize 확정 후 기준 URL 저장 (이후 페이지 이동 시 URL 직접 이동에 사용)
-        config.base_search_url = driver.current_url
-        print(f'[INFO] 기준 검색 URL 저장: {config.base_search_url}')
+            # 필터+pageSize 확정 후 기준 URL 저장 (이후 페이지 이동 시 URL 직접 이동에 사용)
+            config.base_search_url = driver.current_url
+            print(f'[INFO] 기준 검색 URL 저장: {config.base_search_url}')
 
         visited_pages = 0
         page_fail_count = {}  # 페이지별 연속 실패 횟수
 
         while visited_pages < config.MAX_PAGE_VISITS:
+            # 페이지 처리 전 세션 만료 체크
+            if is_session_expired(driver):
+                if not _relogin_and_setup(driver, year, config, username, password):
+                    raise Exception('페이지 처리 중 재로그인 실패')
+                # 재로그인 후 현재 페이지로 URL 직접 이동
+                if hasattr(config, 'base_search_url') and config.base_search_url:
+                    page_url = re.sub(r'pageNumber=\d+', f'pageNumber={current_page}',
+                                      config.base_search_url)
+                    if 'pageNumber=' not in page_url:
+                        sep = '&' if '?' in page_url else '?'
+                        page_url = page_url + sep + f'pageNumber={current_page}'
+                    driver.get(page_url)
+                    time.sleep(8)
+
             success = process_current_page(driver, current_page, config)
 
             if not success:
@@ -937,7 +1027,7 @@ def crawl_year(year, username, password, save_base_path, headless=False):
         if not access_ieee_via_library(driver):
             print(f'\n[ERROR] {year}년: IEEE 접속 실패')
             return
-        _do_year_crawl(driver, year, config)
+        _do_year_crawl(driver, year, config, username, password)
     except KeyboardInterrupt:
         pass  # _do_year_crawl 에서 이미 출력
     except Exception:
@@ -1072,7 +1162,7 @@ def main():
 
             interrupted = False
             try:
-                _do_year_crawl(driver, year, config)
+                _do_year_crawl(driver, year, config, username, password)
             except KeyboardInterrupt:
                 interrupted = True
             except Exception:
