@@ -35,6 +35,7 @@ import argparse
 import warnings
 import traceback
 import zipfile
+import csv
 from datetime import datetime
 from pathlib import Path
 
@@ -80,6 +81,76 @@ def setup_file_logger(save_base_path, year):
     return logger
 
 
+# ==================== 크롤링 통계 ====================
+class CrawlStats:
+    """저널별 크롤링 통계 추적 (CSV 저장용)"""
+    CSV_COLUMNS = [
+        'date', 'start_time', 'end_time', 'elapsed_minutes',
+        'year_crawled', 'journal',
+        'pages_processed', 'pages_skipped',
+        'zip_downloads', 'pdfs_extracted', 'duplicates_skipped',
+        'select_all_failures', 'download_failures', 'session_relogins',
+    ]
+
+    def __init__(self, year, journal):
+        now = datetime.now()
+        self.date            = now.strftime('%Y-%m-%d')
+        self.start_time      = now.strftime('%H:%M:%S')
+        self.end_time        = ''
+        self.elapsed_minutes = 0.0
+        self._start_dt       = now
+        self.year_crawled    = int(year)
+        self.journal         = journal
+        self.pages_processed    = 0
+        self.pages_skipped      = 0
+        self.zip_downloads      = 0
+        self.pdfs_extracted     = 0
+        self.duplicates_skipped = 0
+        self.select_all_failures  = 0
+        self.download_failures    = 0
+        self.session_relogins     = 0
+
+    def finalize(self):
+        now = datetime.now()
+        self.end_time        = now.strftime('%H:%M:%S')
+        self.elapsed_minutes = round((now - self._start_dt).total_seconds() / 60, 2)
+
+    def as_row(self):
+        return {
+            'date':               self.date,
+            'start_time':         self.start_time,
+            'end_time':           self.end_time,
+            'elapsed_minutes':    self.elapsed_minutes,
+            'year_crawled':       self.year_crawled,
+            'journal':            self.journal,
+            'pages_processed':    self.pages_processed,
+            'pages_skipped':      self.pages_skipped,
+            'zip_downloads':      self.zip_downloads,
+            'pdfs_extracted':     self.pdfs_extracted,
+            'duplicates_skipped': self.duplicates_skipped,
+            'select_all_failures':  self.select_all_failures,
+            'download_failures':    self.download_failures,
+            'session_relogins':     self.session_relogins,
+        }
+
+
+def write_stats_row(stats: CrawlStats):
+    """월별 CSV 파일에 통계 1행 추가. MANAGE_FILES_PATH 에 저장."""
+    try:
+        MANAGE_FILES_PATH.mkdir(parents=True, exist_ok=True)
+        ym = datetime.now().strftime('%Y_%m')
+        csv_path = MANAGE_FILES_PATH / f'stats_{ym}.csv'
+        file_exists = csv_path.exists()
+        with open(csv_path, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=CrawlStats.CSV_COLUMNS)
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(stats.as_row())
+        print(f'[STATS] {csv_path.name} 에 통계 저장 완료')
+    except Exception as e:
+        print(f'[경고] 통계 CSV 저장 실패: {e}')
+
+
 # ==================== 기본 저장 경로 ====================
 DEFAULT_SAVE_PATH_LINUX   = '/nas1/hyperspectral_literature_data_collected/01_IEEE_TGRS_1980_2025'
 DEFAULT_SAVE_PATH_WINDOWS = os.path.join(os.path.expanduser('~'), 'Downloads', 'IEEE_TGRS')
@@ -96,6 +167,54 @@ XPATH_LOGIN_BTN = '//button[@type="submit" and normalize-space(.)="로그인"]'
 XPATH_IEEE_LINK = '//a[contains(text(), "IEL") or (contains(text(), "IEEE") and string-length(text()) > 5)]'
 
 IEEE_PROXY_HOME   = 'https://ieeexplore-ieee-org-ssl.proxy.kookmin.ac.kr/Xplore/home.jsp'
+
+# ==================== 통계 CSV 저장 경로 ====================
+MANAGE_FILES_PATH = Path('/nas1/hyperspectral_literature_data_collected/01_IEEE_TGRS_1980_2025_logs/manage_files')
+
+# ==================== 대상 저널/학회 목록 ====================
+# (Publication Title 필터에 입력할 검색어, 클릭할 레이블에서 일치시킬 텍스트)
+JOURNAL_TARGETS = [
+    # --- Remote Sensing 핵심 저널 ---
+    ("Transactions on Geoscience and Remote Sensing",   "IEEE Transactions on Geoscience and Remote Sensing"),
+    ("Geoscience and Remote Sensing Letters",           "IEEE Geoscience and Remote Sensing Letters"),
+    ("Selected Topics in Applied Earth",                "IEEE Journal of Selected Topics in Applied Earth Observations"),
+    # --- 이미지 처리 / 컴퓨터 비전 ---
+    ("Transactions on Image Processing",                "IEEE Transactions on Image Processing"),
+    ("Transactions on Pattern Analysis",                "IEEE Transactions on Pattern Analysis and Machine Intelligence"),
+    ("Transactions on Multimedia",                      "IEEE Transactions on Multimedia"),
+    ("Circuits and Systems for Video",                  "IEEE Transactions on Circuits and Systems for Video Technology"),
+    # --- 신호 처리 ---
+    ("Transactions on Signal Processing",               "IEEE Transactions on Signal Processing"),
+    ("Signal Processing Letters",                       "IEEE Signal Processing Letters"),
+    ("Selected Topics in Signal Processing",            "IEEE Journal of Selected Topics in Signal Processing"),
+    # --- 광학/포토닉스/센서 ---
+    ("Sensors Journal",                                 "IEEE Sensors Journal"),
+    ("Photonics Journal",                               "IEEE Photonics Journal"),
+    ("Photonics Technology Letters",                    "IEEE Photonics Technology Letters"),
+    # --- 측정/계측/항공우주 ---
+    ("Instrumentation and Measurement",                 "IEEE Transactions on Instrumentation and Measurement"),
+    ("Aerospace and Electronic Systems",                "IEEE Transactions on Aerospace and Electronic Systems"),
+    ("Systems Journal",                                 "IEEE Systems Journal"),
+    # --- AI / 머신러닝 ---
+    ("Neural Networks and Learning",                    "IEEE Transactions on Neural Networks and Learning Systems"),
+    ("Transactions on Cybernetics",                     "IEEE Transactions on Cybernetics"),
+    ("Transactions on Emerging Topics in Computational","IEEE Transactions on Emerging Topics in Computational Intelligence"),
+    ("Transactions on Artificial Intelligence",         "IEEE Transactions on Artificial Intelligence"),
+    # --- 일반/대형 저널 ---
+    ("IEEE Access",                                     "IEEE Access"),
+    ("Proceedings of the IEEE",                         "Proceedings of the IEEE"),
+    # --- 학회/Conference ---
+    ("IGARSS",                                          "IGARSS"),
+    ("International Conference on Image Processing",    "IEEE International Conference on Image Processing"),
+    ("CVPR",                                            "IEEE/CVF Conference on Computer Vision and Pattern Recognition"),
+    ("ICCV",                                            "IEEE/CVF International Conference on Computer Vision"),
+    ("ICASSP",                                          "ICASSP"),
+    ("International Geoscience",                        "International Geoscience and Remote Sensing Symposium"),
+    # --- 기타 관련 저널 ---
+    ("Transactions on Medical Imaging",                 "IEEE Transactions on Medical Imaging"),
+    ("Journal of Oceanic Engineering",                  "IEEE Journal of Oceanic Engineering"),
+    ("Transactions on Sustainable Energy",              "IEEE Transactions on Sustainable Energy"),
+]
 
 
 # ==================== 크롤링 설정 ====================
@@ -114,7 +233,7 @@ class CrawlConfig:
 
         self.MIN_RANDOM_DELAY       = 3
         self.MAX_RANDOM_DELAY       = 8
-        self.MAX_PAGE_VISITS        = 100
+        self.MAX_PAGE_VISITS        = 9999   # 사실상 무제한 (전체 페이지 다운)
         self.MAX_SEAT_LIMIT_RETRIES = 5
         self.MAX_PAGE_RETRIES       = 3   # 페이지 연속 실패 시 건너뜀 한계
 
@@ -140,6 +259,13 @@ def setup_chrome_driver(download_dir, headless=False):
     # (서버에서 /tmp 가득 찼거나 권한 문제 시 "cannot create temp dir" 에러 방지)
     chrome_tmp_dir = Path(download_dir).parent / '.chrome_profile'
     chrome_tmp_dir.mkdir(parents=True, exist_ok=True)
+
+    # TMPDIR을 /tmp 대신 로컬 경로로 오버라이드
+    # Chrome은 --disable-extensions 설정과 무관하게 내부적으로 TMPDIR을 사용함
+    # /tmp가 가득 찼거나 권한 문제 시 "cannot create temp dir for unpacking extensions" 에러 발생
+    chrome_local_tmp = Path('/data/khkim/chrome_tmp')
+    chrome_local_tmp.mkdir(parents=True, exist_ok=True)
+    os.environ['TMPDIR'] = str(chrome_local_tmp)
     # 이전 실행에서 남겨진 SingletonLock 제거 (없으면 다음 Chrome 기동이 "already in use"로 실패)
     for lock in ['SingletonLock', 'SingletonCookie', 'SingletonSocket']:
         lock_path = chrome_tmp_dir / lock
@@ -151,6 +277,8 @@ def setup_chrome_driver(download_dir, headless=False):
     options.add_argument(f'--user-data-dir={chrome_tmp_dir}')
     options.add_argument('--no-first-run')
     options.add_argument('--no-default-browser-check')
+    options.add_argument('--disable-extensions')        # extension 언팩 시 /tmp 사용 방지
+    options.add_argument('--disable-plugins')
 
     if headless:
         options.add_argument('--headless=new')
@@ -448,8 +576,14 @@ def setup_ieee_advanced_search(driver, year):
 
 
 # ==================== 4단계: Publication 필터 ====================
-def apply_publication_filter(driver, journal_name):
-    print(f'4단계: 저널 필터 적용 - {journal_name}')
+def apply_publication_filter(driver, search_term, label_match=None):
+    """Publication Title 필터 적용.
+
+    search_term : 필터 검색창에 입력할 텍스트 (예: "Geoscience and Remote Sensing")
+    label_match : 클릭할 레이블에서 일치시킬 텍스트 (None이면 search_term 사용)
+    """
+    match_text = label_match or search_term
+    print(f'4단계: 저널 필터 적용 - {match_text}')
 
     try:
         # "Publication Title" 섹션 토글 버튼 찾기 (접혀 있으면 펼침)
@@ -466,7 +600,6 @@ def apply_publication_filter(driver, journal_name):
             print('[OK] Publication Title 섹션 펼침')
 
         # 섹션 내 검색 입력창
-        # DOM 구조: <header> (grandparent of btn) > following-sibling > input[placeholder='Enter Title']
         search_input = WebDriverWait(driver, 10).until(
             EC.presence_of_element_located(
                 (By.XPATH,
@@ -475,15 +608,16 @@ def apply_publication_filter(driver, journal_name):
             )
         )
         search_input.clear()
-        search_input.send_keys('Geoscience and Remote Sensing')
+        search_input.send_keys(search_term)
         time.sleep(4)  # 자동완성 결과 로딩 대기
 
-        # 해당 저널 체크박스 레이블 클릭
-        # "IEEE Transactions on Geoscience and Remote Sensing" 정확히 선택
+        # 해당 저널 체크박스 레이블 클릭 (match_text를 포함하는 레이블)
+        # match_text가 너무 길면 앞 40자만 사용
+        match_substr = match_text[:40] if len(match_text) > 40 else match_text
         label = WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable(
                 (By.XPATH,
-                 "//label[contains(normalize-space(), 'Transactions on Geoscience and Remote Sensing')]")
+                 f"//label[contains(normalize-space(), '{match_substr}')]")
             )
         )
         driver.execute_script('arguments[0].click();', label)
@@ -491,7 +625,6 @@ def apply_publication_filter(driver, journal_name):
         time.sleep(2)
 
         # Apply 버튼 클릭 (displayed=True, enabled=True인 것 선택)
-        # Year 필터용 Apply(disabled)와 Publication Title용 Apply(enabled) 중 enabled 것을 클릭
         apply_btn = WebDriverWait(driver, 10).until(
             lambda d: next(
                 (b for b in d.find_elements(By.CSS_SELECTOR, "button.stats-applyRefinements-button")
@@ -564,15 +697,45 @@ def set_items_per_page(driver, items=10):
 
 
 # ==================== 페이지 처리 ====================
-def select_all_results(driver):
-    for attempt in range(3):
+# 전체 선택 체크박스 CSS 셀렉터 (우선순위 순)
+_SELECT_ALL_SELECTORS = [
+    "input.results-actions-selectall-checkbox",
+    "input[type='checkbox'][class*='selectall']",
+    "input[type='checkbox'][class*='select-all']",
+    "input[type='checkbox'][aria-label*='Select all']",
+    "input[type='checkbox'][aria-label*='select all']",
+    "input[type='checkbox'][aria-label*='Select All']",
+    ".results-actions-selectall input[type='checkbox']",
+    "xpl-select-all input[type='checkbox']",
+    "div.results-actions input[type='checkbox']",
+    "input[type='checkbox'][id*='select-all']",
+]
+
+
+def select_all_results(driver, stats=None):
+    """전체 선택 체크박스 클릭. 성공 여부 반환."""
+    MAX_ATTEMPTS = 5
+    for attempt in range(MAX_ATTEMPTS):
         try:
-            # 페이지 로딩 대기 (Angular 렌더링 시간 확보)
-            select_all = WebDriverWait(driver, 20).until(
-                EC.presence_of_element_located(
-                    (By.CSS_SELECTOR, "input.results-actions-selectall-checkbox")
-                )
-            )
+            # 맨 위로 스크롤 후 렌더링 대기
+            driver.execute_script('window.scrollTo(0, 0);')
+            time.sleep(2)
+
+            # 여러 셀렉터로 체크박스 탐색
+            select_all = None
+            for sel in _SELECT_ALL_SELECTORS:
+                try:
+                    el = WebDriverWait(driver, 5).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, sel))
+                    )
+                    select_all = el
+                    break
+                except Exception:
+                    continue
+
+            if select_all is None:
+                raise TimeoutException('모든 셀렉터에서 체크박스 미발견')
+
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", select_all)
             time.sleep(1)
             if not select_all.is_selected():
@@ -580,15 +743,52 @@ def select_all_results(driver):
                 print('[OK] Select All on Page 클릭')
                 time.sleep(2)
             return True
+
         except Exception as e:
-            print(f'[재시도 {attempt + 1}/3] 전체 선택 실패 ({type(e).__name__}: {str(e)[:80]})')
-            time.sleep(10)  # Angular 렌더링 대기 (페이지 refresh 없이)
-    print(f'[오류] 전체 선택 3회 실패  현재 URL: {driver.current_url}')
+            err_short = f'{type(e).__name__}: {str(e)[:60]}'
+            print(f'[재시도 {attempt + 1}/{MAX_ATTEMPTS}] 전체 선택 실패 ({err_short})')
+
+            if attempt == 1:
+                # 2번째 실패: 페이지 새로고침 후 재시도
+                print('[재시도] 페이지 새로고침 후 재시도...')
+                try:
+                    driver.refresh()
+                    time.sleep(15)
+                except Exception:
+                    pass
+            elif attempt == 3:
+                # 4번째 실패: JavaScript로 직접 찾기 시도
+                try:
+                    found = driver.execute_script("""
+                        var cbs = document.querySelectorAll("input[type='checkbox']");
+                        for (var i=0; i<cbs.length; i++) {
+                            var cls = cbs[i].className || '';
+                            var lbl = (cbs[i].getAttribute('aria-label') || '').toLowerCase();
+                            if (cls.toLowerCase().indexOf('select') >= 0 || lbl.indexOf('select all') >= 0) {
+                                cbs[i].click();
+                                return true;
+                            }
+                        }
+                        return false;
+                    """)
+                    if found:
+                        print('[OK] JS 직접 클릭으로 전체 선택 성공')
+                        time.sleep(2)
+                        return True
+                except Exception:
+                    pass
+            else:
+                time.sleep(12)
+
+    print(f'[오류] 전체 선택 {MAX_ATTEMPTS}회 실패  현재 URL: {driver.current_url}')
+    if stats is not None:
+        stats.select_all_failures += 1
     return False
 
 
-def unzip_and_cleanup(zip_path, save_dir):
-    """zip 파일에서 PDF만 추출 후 zip 삭제. 크롬 임시파일도 정리."""
+def unzip_and_cleanup(zip_path, save_dir, stats=None):
+    """zip 파일에서 PDF만 추출 후 zip 삭제. 크롬 임시파일도 정리.
+    Returns (extracted, skipped) 튜플."""
     save_dir = Path(save_dir)
     zip_path = Path(zip_path)
     extracted = 0
@@ -625,8 +825,14 @@ def unzip_and_cleanup(zip_path, save_dir):
             except Exception:
                 pass
 
+    if stats is not None:
+        stats.pdfs_extracted     += extracted
+        stats.duplicates_skipped += skipped
 
-def trigger_download(driver, config, page_number=1):
+    return extracted, skipped
+
+
+def trigger_download(driver, config, page_number=1, stats=None):
     try:
         save_dir = Path(config.SAVE_PATH)
 
@@ -635,7 +841,9 @@ def trigger_download(driver, config, page_number=1):
             if f.is_file() and f.suffix == '.zip' and not f.name.endswith('.crdownload'):
                 sz = f.stat().st_size
                 print(f'[재개] 이전 시도 완료 zip 발견: {f.name} ({sz // 1024} KB) → 처리')
-                unzip_and_cleanup(f, save_dir)
+                unzip_and_cleanup(f, save_dir, stats=stats)
+                if stats is not None:
+                    stats.zip_downloads += 1
                 return True
 
         # 다운로드 전 기존 파일 목록 기록 (.crdownload 포함)
@@ -695,7 +903,9 @@ def trigger_download(driver, config, page_number=1):
                     sz = f.stat().st_size
                     print(f'[OK] 다운로드 완료: {f.name}  (페이지 {page_number}, {sz // 1024} KB)')
                     if f.suffix == '.zip':
-                        unzip_and_cleanup(f, save_dir)
+                        unzip_and_cleanup(f, save_dir, stats=stats)
+                    if stats is not None:
+                        stats.zip_downloads += 1
                     return True
                 # 진행 중인 파일 감지 (.crdownload) → 데드라인 600초 연장
                 if f.name.endswith('.crdownload') and not download_started:
@@ -732,7 +942,9 @@ def trigger_download(driver, config, page_number=1):
                         and f.name not in existing):
                     sz = f.stat().st_size
                     print(f'[OK] 다운로드 완료 (지연 감지): {f.name}  (페이지 {page_number}, {sz // 1024} KB)')
-                    unzip_and_cleanup(f, save_dir)
+                    unzip_and_cleanup(f, save_dir, stats=stats)
+                    if stats is not None:
+                        stats.zip_downloads += 1
                     return True
 
         if crdownload_path and crdownload_path.exists():
@@ -740,6 +952,8 @@ def trigger_download(driver, config, page_number=1):
             print(f'[경고] 다운로드 최종 타임아웃  {crdownload_path.name}: {sz // 1024} KB (파일 유지)')
         else:
             print('[경고] 다운로드 최종 타임아웃')
+        if stats is not None:
+            stats.download_failures += 1
         return False
 
     except Exception as e:
@@ -747,7 +961,7 @@ def trigger_download(driver, config, page_number=1):
         return False
 
 
-def process_current_page(driver, page_number, config):
+def process_current_page(driver, page_number, config, stats=None):
     print(f"\n{'='*60}")
     print(f'페이지 {page_number} 처리')
     print(f"{'='*60}")
@@ -762,12 +976,14 @@ def process_current_page(driver, page_number, config):
             continue
 
         try:
-            if not select_all_results(driver):
+            if not select_all_results(driver, stats=stats):
                 continue
-            if not trigger_download(driver, config, page_number):
+            if not trigger_download(driver, config, page_number, stats=stats):
                 continue
 
             print(f'[OK] 페이지 {page_number} 완료')
+            if stats is not None:
+                stats.pages_processed += 1
             random_delay(5, 15)
             return True
 
@@ -778,6 +994,8 @@ def process_current_page(driver, page_number, config):
             raise
 
     print(f'[실패] 페이지 {page_number}: Seat Limit 재시도 초과')
+    if stats is not None:
+        stats.pages_skipped += 1
     return False
 
 
@@ -879,9 +1097,12 @@ def go_to_next_page(driver, current_page, config):
 
 
 # ==================== 단일 연도 크롤링 ====================
-def _relogin_and_setup(driver, year, config, username, password):
+def _relogin_and_setup(driver, year, config, username, password,
+                       search_term=None, label_match=None, stats=None):
     """세션 만료 시 재로그인 후 검색 설정 복구. 성공하면 True."""
     print('[재로그인] 프록시 세션 만료 → 재로그인 시도')
+    if stats is not None:
+        stats.session_relogins += 1
     if not login_kookmin_library(driver, username, password):
         print('[재로그인] 도서관 로그인 실패')
         return False
@@ -891,7 +1112,10 @@ def _relogin_and_setup(driver, year, config, username, password):
     if not setup_ieee_advanced_search(driver, year):
         print('[재로그인] Advanced Search 실패')
         return False
-    if not apply_publication_filter(driver, config.TARGET_JOURNAL):
+    # 현재 저널 필터 재적용
+    cur_search = search_term or 'Transactions on Geoscience and Remote Sensing'
+    cur_label  = label_match or 'IEEE Transactions on Geoscience and Remote Sensing'
+    if not apply_publication_filter(driver, cur_search, cur_label):
         print('[재로그인] 저널 필터 건너뜀')
     if not set_items_per_page(driver, 10):
         print('[재로그인] Items per page 건너뜀')
@@ -900,14 +1124,101 @@ def _relogin_and_setup(driver, year, config, username, password):
     return True
 
 
-def _do_year_crawl(driver, year, config, username, password):
-    """단일 연도의 크롤링 내부 루프.
+def _crawl_one_journal(driver, year, config, username, password,
+                       search_term, label_match, stats):
+    """단일 저널의 전 페이지 다운로드 루프. _do_year_crawl 에서 저널마다 호출."""
+    print(f"\n{'='*60}")
+    print(f'저널 크롤링 시작: {label_match}  ({year}년)')
+    print(f"{'='*60}\n")
 
-    로그인·IEEE 접속이 완료된 driver를 받아 검색→필터→다운로드를 수행한다.
-    예외는 출력 후 re-raise하여 호출자가 정리하게 한다.
+    # 검색 + 필터 설정
+    if not setup_ieee_advanced_search(driver, year):
+        print(f'[경고] Advanced Search 실패 → 다음 저널로 건너뜀')
+        return
+
+    if is_session_expired(driver):
+        if not _relogin_and_setup(driver, year, config, username, password,
+                                  search_term, label_match, stats):
+            print('[경고] 재로그인 실패 → 다음 저널로 건너뜀')
+            return
+    else:
+        if not apply_publication_filter(driver, search_term, label_match):
+            print(f'[경고] 저널 필터 실패 ({label_match}) → 다음 저널로 건너뜀')
+            return
+
+        if not set_items_per_page(driver, 10):
+            print('[경고] Items per page 설정 건너뜀 - 기본값으로 진행')
+
+        config.base_search_url = driver.current_url
+        print(f'[INFO] 기준 검색 URL 저장: {config.base_search_url}')
+
+    current_page = config.START_PAGE
+    visited_pages = 0
+    page_fail_count = {}
+
+    while visited_pages < config.MAX_PAGE_VISITS:
+        # 세션 만료 체크
+        if is_session_expired(driver):
+            if not _relogin_and_setup(driver, year, config, username, password,
+                                      search_term, label_match, stats):
+                print('[경고] 페이지 처리 중 재로그인 실패 → 저널 크롤링 중단')
+                break
+            if hasattr(config, 'base_search_url') and config.base_search_url:
+                page_url = re.sub(r'pageNumber=\d+', f'pageNumber={current_page}',
+                                  config.base_search_url)
+                if 'pageNumber=' not in page_url:
+                    sep = '&' if '?' in page_url else '?'
+                    page_url = page_url + sep + f'pageNumber={current_page}'
+                driver.get(page_url)
+                time.sleep(8)
+
+        success = process_current_page(driver, current_page, config, stats=stats)
+
+        if not success:
+            fails = page_fail_count.get(current_page, 0) + 1
+            page_fail_count[current_page] = fails
+            if fails >= config.MAX_PAGE_RETRIES:
+                print(f'[경고] 페이지 {current_page} {fails}회 연속 실패 → 건너뜀')
+                if stats is not None:
+                    stats.pages_skipped += 1
+                visited_pages += 1
+                next_page = go_to_next_page(driver, current_page, config)
+                if next_page is None:
+                    print(f'[완료] {label_match} 전체 페이지 처리 완료!')
+                    break
+                current_page = next_page
+            else:
+                print(f'[경고] 페이지 {current_page} 실패 ({fails}/{config.MAX_PAGE_RETRIES}), 2분 대기 후 재시도')
+                time.sleep(120)
+            continue
+
+        page_fail_count[current_page] = 0
+        visited_pages += 1
+        next_page = go_to_next_page(driver, current_page, config)
+        if next_page is None:
+            print(f'[완료] {label_match} 전체 페이지 처리 완료!')
+            break
+        current_page = next_page
+
+    end_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    print(f"\n{'='*60}")
+    print(f'[완료] {label_match} ({year}년)  종료: {end_ts}')
+    print(f"  페이지: {stats.pages_processed}개 완료, {stats.pages_skipped}개 건너뜀")
+    print(f"  PDF: {stats.pdfs_extracted}개 추출, {stats.duplicates_skipped}개 중복")
+    print(f"  Zip: {stats.zip_downloads}개  전체선택실패: {stats.select_all_failures}회")
+    print(f"{'='*60}\n")
+
+
+def _do_year_crawl(driver, year, config, username, password,
+                   journal_targets=None):
+    """단일 연도의 크롤링 내부 루프 — 모든 대상 저널을 순회.
+
+    로그인·IEEE 접속이 완료된 driver를 받아 저널마다 검색→필터→다운로드를 수행한다.
     """
-    # CDP로 해당 연도 다운로드 경로 변경 (드라이버 재생성 없이 경로만 교체)
-    # Browser.setDownloadBehavior가 신규 Chrome에서 더 안정적; Page 버전으로 fallback
+    if journal_targets is None:
+        journal_targets = JOURNAL_TARGETS
+
+    # CDP로 해당 연도 다운로드 경로 변경
     try:
         driver.execute_cdp_cmd('Browser.setDownloadBehavior', {
             'behavior': 'allow',
@@ -922,80 +1233,42 @@ def _do_year_crawl(driver, year, config, username, password):
         })
         print(f'[CDP] 다운로드 경로(Page): {config.SAVE_PATH}')
 
-    current_page = config.START_PAGE
-
     try:
-        if not setup_ieee_advanced_search(driver, year):
-            raise Exception('Advanced Search 실패')
+        for idx, (search_term, label_match) in enumerate(journal_targets, 1):
+            print(f"\n{'#'*60}")
+            print(f'# [{idx}/{len(journal_targets)}] {label_match}')
+            print(f"{'#'*60}")
 
-        # 세션 만료 감지 → 즉시 재로그인
-        if is_session_expired(driver):
-            if not _relogin_and_setup(driver, year, config, username, password):
-                raise Exception('재로그인 실패')
-        else:
-            if not apply_publication_filter(driver, config.TARGET_JOURNAL):
-                print('[경고] 저널 필터 건너뜀 - 전체 연도 결과로 진행')
+            stats = CrawlStats(year=year, journal=label_match)
+            try:
+                _crawl_one_journal(driver, year, config, username, password,
+                                   search_term, label_match, stats)
+            except KeyboardInterrupt:
+                stats.finalize()
+                write_stats_row(stats)
+                raise
+            except Exception as e:
+                ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                print(f'[ERROR] {label_match} 크롤링 실패 [{ts}]: {e}')
+                traceback.print_exc()
+            finally:
+                stats.finalize()
+                write_stats_row(stats)
 
-            if not set_items_per_page(driver, 10):
-                print('[경고] Items per page 설정 건너뜀 - 기본값으로 진행')
-
-            # 필터+pageSize 확정 후 기준 URL 저장 (이후 페이지 이동 시 URL 직접 이동에 사용)
-            config.base_search_url = driver.current_url
-            print(f'[INFO] 기준 검색 URL 저장: {config.base_search_url}')
-
-        visited_pages = 0
-        page_fail_count = {}  # 페이지별 연속 실패 횟수
-
-        while visited_pages < config.MAX_PAGE_VISITS:
-            # 페이지 처리 전 세션 만료 체크
-            if is_session_expired(driver):
-                if not _relogin_and_setup(driver, year, config, username, password):
-                    raise Exception('페이지 처리 중 재로그인 실패')
-                # 재로그인 후 현재 페이지로 URL 직접 이동
-                if hasattr(config, 'base_search_url') and config.base_search_url:
-                    page_url = re.sub(r'pageNumber=\d+', f'pageNumber={current_page}',
-                                      config.base_search_url)
-                    if 'pageNumber=' not in page_url:
-                        sep = '&' if '?' in page_url else '?'
-                        page_url = page_url + sep + f'pageNumber={current_page}'
-                    driver.get(page_url)
-                    time.sleep(8)
-
-            success = process_current_page(driver, current_page, config)
-
-            if not success:
-                fails = page_fail_count.get(current_page, 0) + 1
-                page_fail_count[current_page] = fails
-                if fails >= config.MAX_PAGE_RETRIES:
-                    print(f'[경고] 페이지 {current_page} {fails}회 연속 실패 → 건너뜀')
-                    visited_pages += 1
-                    next_page = go_to_next_page(driver, current_page, config)
-                    if next_page is None:
-                        print(f'\n[완료] {year}년 모든 페이지 처리 완료!')
-                        break
-                    current_page = next_page
-                else:
-                    print(f'[경고] 페이지 {current_page} 실패 ({fails}/{config.MAX_PAGE_RETRIES}), 2분 대기 후 재시도')
-                    time.sleep(120)
-                continue
-
-            page_fail_count[current_page] = 0  # 성공 시 카운터 초기화
-            visited_pages += 1
-            next_page = go_to_next_page(driver, current_page, config)
-            if next_page is None:
-                print(f'\n[완료] {year}년 모든 페이지 처리 완료!')
-                break
-            current_page = next_page
+            # 저널 간 짧은 대기
+            if idx < len(journal_targets):
+                print('[대기] 다음 저널 전 15초 대기...')
+                time.sleep(15)
 
         end_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         print(f"\n{'='*60}")
-        print(f'{year}년 크롤링 완료!  저장 경로: {config.SAVE_PATH}')
+        print(f'{year}년 전체 저널 크롤링 완료!  저장 경로: {config.SAVE_PATH}')
         print(f'종료 시각: {end_ts}')
         print(f"{'='*60}\n")
 
     except KeyboardInterrupt:
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        print(f'\n[INTERRUPTED] 사용자 중단  [{ts}]  (페이지 {current_page}까지 완료)')
+        print(f'\n[INTERRUPTED] 사용자 중단  [{ts}]')
         raise
     except Exception as e:
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -1126,11 +1399,13 @@ def main():
 
     # 시작 요약
     print('\n' + '='*60)
-    print('IEEE TGRS 논문 크롤러 시작')
+    print('IEEE 논문 대용량 크롤러 시작')
     print('='*60)
     print(f'  브라우저    : {"headless" if args.headless else "GUI (브라우저 화면 표시)"}')
     print(f'  대상 연도   : {years}')
+    print(f'  대상 저널 수 : {len(JOURNAL_TARGETS)}개')
     print(f'  저장 경로   : {save_base_path}')
+    print(f'  통계 경로   : {MANAGE_FILES_PATH}')
     print(f'  로그인 ID   : {username}')
     print('='*60 + '\n')
 
