@@ -18,7 +18,10 @@ Hyperspectral Imaging(HSI) 및 Remote Sensing 관련 논문 PDF 대용량 수집
    - 3.3 [진행 상황 추적 파일 (progress JSON)](#33-진행-상황-추적-파일-progress-json)
    - 3.4 [--resume 재개 기능](#34---resume-재개-기능)
    - 3.5 [--status 진행 상황 확인](#35---status-진행-상황-확인)
-4. [IEEE TGRS 크롤링 전체 흐름](#ieee-tgrs-크롤링-crawling_ieee_2023_2025py)
+4. [IEEE 대용량 크롤링 — 3차 개선](#ieee-대용량-크롤링--3차-개선)
+   - 4.1 [재로그인 후 전체 선택 실패 근본 원인 수정](#41-재로그인-후-전체-선택-실패-근본-원인-수정)
+   - 4.2 [Select All 대기 시간 및 스크롤 트리거 개선](#42-select-all-대기-시간-및-스크롤-트리거-개선)
+5. [IEEE TGRS 크롤링 전체 흐름](#ieee-tgrs-크롤링-crawling_ieee_2023_2025py)
 5. [빠른 시작](#빠른-시작)
 6. [전체 옵션](#전체-옵션)
 7. [기본 저장 경로](#기본-저장-경로)
@@ -301,6 +304,117 @@ python crawling_ieee_2023_2025.py --status --years 2023 2024 2025
 
 ---
 
+## IEEE 대용량 크롤링 — 3차 개선
+
+---
+
+### 4.1 재로그인 후 전체 선택 실패 근본 원인 수정
+
+#### 문제 상황
+
+크롤링 도중 세션이 만료되면 자동으로 재로그인한 뒤 중단됐던 페이지(예: 21페이지)부터 다시 이어갑니다.  
+이때 코드는 `pageNumber=21`이 포함된 URL로 바로 이동하고 8초 대기한 후 "전체 선택" 체크박스를 찾았는데, 아래 오류가 반복됐습니다.
+
+```
+[세션 만료] 감지 → 재로그인 시도
+[OK] 재로그인 성공
+→ 페이지 21 이동 (URL 직접)
+[오류] 전체 선택 실패 (TimeoutException: 모든 셀렉터에서 체크박스 미발견)
+[오류] 전체 선택 실패 ...  ← 계속 반복
+```
+
+#### 근본 원인: Angular SPA 의 "콜드 스타트" 문제
+
+IEEE Xplore는 **Angular** 기반의 SPA(Single Page Application)입니다.  
+Angular 앱은 처음 로드될 때 내부 컴포넌트들을 순서대로 초기화합니다.  
+이때 **"전체 선택" 체크박스가 들어있는 `results-actions` 컴포넌트**는 **1페이지를 정상 경로로 거쳐야만 제대로 초기화**됩니다.
+
+재로그인 직후에는 브라우저가 Angular 앱을 처음 띄운 상태(콜드 스타트)이므로, 21페이지 URL로 바로 이동하면:
+
+| 항목 | 상태 |
+|------|------|
+| 검색 결과 아이템 | ✅ 정상 표시됨 (`has_search_results()` → True 반환) |
+| `results-actions` 컴포넌트 | ❌ 초기화 안 됨 → 체크박스 없음 |
+
+즉, **결과 목록은 보이지만 "전체 선택" 버튼만 없는** 상태가 됩니다.
+
+#### 해결책: `_navigate_with_warmup()` 워밍업 함수
+
+중간 페이지로 바로 이동하는 대신, **반드시 1페이지를 먼저 방문**한 후 목표 페이지로 이동합니다.  
+이렇게 하면 Angular가 1페이지에서 `results-actions` 컴포넌트를 완전히 초기화하고, 이후 21페이지로 이동해도 체크박스가 정상적으로 존재합니다.
+
+```
+기존 방식:
+  재로그인 → pageNumber=21 바로 이동 (8초 대기) → 체크박스 없음 → 실패
+
+새 방식 (_navigate_with_warmup):
+  재로그인 → pageNumber=1 이동 (15초 대기 + 스크롤) → pageNumber=21 이동 (15초 대기 + 스크롤) → 체크박스 정상 발견
+```
+
+**코드 흐름**:
+
+```python
+def _navigate_with_warmup(driver, base_search_url, target_page):
+    # 1단계: 1페이지 먼저 방문 → Angular 전체 초기화
+    driver.get(base_search_url + "&pageNumber=1")
+    time.sleep(15)                        # Angular 컴포넌트 초기화 대기
+    driver.execute_script('window.scrollTo(0, 400);')   # 스크롤로 lazy 컴포넌트 강제 렌더링
+    time.sleep(2)
+    driver.execute_script('window.scrollTo(0, 0);')
+    time.sleep(3)
+
+    # 2단계: 목표 페이지 이동 (1페이지가 아닌 경우)
+    if target_page > 1:
+        driver.get(base_search_url + f"&pageNumber={target_page}")
+        time.sleep(15)
+        driver.execute_script('window.scrollTo(0, 400);')
+        time.sleep(2)
+        driver.execute_script('window.scrollTo(0, 0);')
+        time.sleep(3)
+```
+
+이 함수는 다음 두 곳에서 사용됩니다:
+- **재로그인 후 복귀**: 중단된 페이지로 돌아갈 때
+- **`--resume` 중간 페이지 시작**: 이전 실행에서 중단된 페이지부터 재개할 때
+
+---
+
+### 4.2 Select All 대기 시간 및 스크롤 트리거 개선
+
+#### 문제
+
+Angular SPA는 스크롤 이벤트가 발생해야 화면 밖에 있는 컴포넌트를 렌더링합니다("lazy rendering").  
+페이지 이동 직후 스크롤 없이 체크박스를 바로 탐색하면 아직 렌더링이 안 된 경우가 있습니다.
+
+#### 개선 내용
+
+| 항목 | 기존 | 변경 후 |
+|------|------|---------|
+| 체크박스 탐색 전 동작 | 없음 | 400px 스크롤 다운 → 다시 최상단 복귀 (lazy 렌더링 강제 트리거) |
+| 첫 번째 시도 대기 시간 | 5초 | **25초** (Angular 초기화를 충분히 기다림) |
+| 2~5번째 시도 대기 시간 | 5초 | 5초 (유지) |
+| 2번째 실패 시 | 페이지 새로고침 | 페이지 새로고침 후 800px 스크롤 |
+
+**스크롤 트리거 동작 설명**:
+
+```
+체크박스 탐색 시작
+  ↓
+400px 아래로 스크롤 → results-actions 컴포넌트 화면에 진입 → Angular lazy 렌더링 시작
+  ↓
+2초 대기
+  ↓
+최상단으로 복귀 스크롤
+  ↓
+3초 대기
+  ↓
+체크박스 탐색 (최대 25초 대기)
+```
+
+이 개선으로 Angular가 초기화되지 않은 직후에도 스크롤 트리거를 통해 렌더링을 강제 실행해 체크박스를 안정적으로 찾을 수 있습니다.
+
+---
+
 ## IEEE TGRS 크롤링 (`crawling_ieee_2023_2025.py`)
 
 ### 전체 흐름
@@ -566,6 +680,16 @@ python tiktoken/scripts/json_token_counter.py "파일.json"
 ---
 
 ## 변경 이력
+
+### 재로그인 후 Angular 콜드스타트 문제 해결 — 워밍업 네비게이션 + Select All 안정성 강화
+
+- **`_navigate_with_warmup()` 추가**: 재로그인 또는 `--resume` 중간 페이지 시작 시 반드시 1페이지를 먼저 방문해 Angular `results-actions` 컴포넌트를 완전히 초기화한 뒤 목표 페이지로 이동. 재로그인 후 "전체 선택" 체크박스 미발견 오류의 근본 원인(Angular SPA 콜드스타트) 해결
+- **`select_all_results()` 스크롤 트리거 추가**: 탐색 전 400px 스크롤 다운 → 최상단 복귀로 Angular lazy 렌더링을 강제 실행. 첫 번째 시도 대기 시간을 5초 → 25초로 늘려 초기화 지연 허용
+- **`_crawl_one_journal` 재로그인 블록 개선**: 기존 URL 직접 이동 + `time.sleep(8)` 을 `_navigate_with_warmup()` 호출로 교체
+- **`--resume` 중간 페이지 시작 개선**: `start_page > 1` 케이스도 `_navigate_with_warmup()` 사용
+- **README_ko.md 3차 개선 내용 추가** (4.1~4.2 섹션)
+
+---
 
 ### 빈 페이지 감지 + 통계 실시간 업데이트 + resume 재개 기능
 

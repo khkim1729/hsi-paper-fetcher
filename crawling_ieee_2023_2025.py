@@ -913,25 +913,52 @@ _SELECT_ALL_SELECTORS = [
 
 
 def select_all_results(driver, stats=None):
-    """전체 선택 체크박스 클릭. 성공 여부 반환."""
+    """전체 선택 체크박스 클릭. 성공 여부 반환.
+
+    재로그인 직후 Angular SPA 가 콜드 스타트 상태에서 중간 페이지에 직접 진입하면
+    결과 목록은 로드되지만 results-actions(Select All 포함) 컴포넌트가
+    뒤늦게 초기화되는 경우가 있다. 스크롤 트리거 + 긴 wait 로 대응한다.
+    """
     MAX_ATTEMPTS = 5
     for attempt in range(MAX_ATTEMPTS):
         try:
-            # 맨 위로 스크롤 후 렌더링 대기
+            # ── Angular 렌더링 트리거: 스크롤 다운 → 업 ─────────────────────
+            # 결과 목록을 한 번 스크롤해야 results-actions 컴포넌트가 활성화되는
+            # IEEE Xplore 특성에 대응한다.
+            driver.execute_script('window.scrollTo(0, 400);')
+            time.sleep(1)
             driver.execute_script('window.scrollTo(0, 0);')
             time.sleep(2)
 
-            # 여러 셀렉터로 체크박스 탐색
+            # ── 여러 셀렉터로 체크박스 탐색 ─────────────────────────────────
+            # 첫 시도: 주 셀렉터에 25 초 대기 (Angular 컴포넌트 초기화 충분히 기다림)
+            # 이후 시도: 셀렉터당 5 초 대기 (빠른 순환)
+            primary_timeout  = 25 if attempt == 0 else 5
+            fallback_timeout = 5
+
             select_all = None
-            for sel in _SELECT_ALL_SELECTORS:
-                try:
-                    el = WebDriverWait(driver, 5).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, sel))
+            # 주 셀렉터 (긴 wait)
+            try:
+                el = WebDriverWait(driver, primary_timeout).until(
+                    EC.presence_of_element_located(
+                        (By.CSS_SELECTOR, _SELECT_ALL_SELECTORS[0])
                     )
-                    select_all = el
-                    break
-                except Exception:
-                    continue
+                )
+                select_all = el
+            except Exception:
+                pass
+
+            # 폴백 셀렉터들
+            if select_all is None:
+                for sel in _SELECT_ALL_SELECTORS[1:]:
+                    try:
+                        el = WebDriverWait(driver, fallback_timeout).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, sel))
+                        )
+                        select_all = el
+                        break
+                    except Exception:
+                        continue
 
             if select_all is None:
                 raise TimeoutException('모든 셀렉터에서 체크박스 미발견')
@@ -949,15 +976,19 @@ def select_all_results(driver, stats=None):
             print(f'[재시도 {attempt + 1}/{MAX_ATTEMPTS}] 전체 선택 실패 ({err_short})')
 
             if attempt == 1:
-                # 2번째 실패: 페이지 새로고침 후 재시도
-                print('[재시도] 페이지 새로고침 후 재시도...')
+                # 2번째 실패: 페이지 새로고침 + 더 큰 스크롤로 렌더링 재유도
+                print('[재시도] 페이지 새로고침 + 스크롤 트리거...')
                 try:
                     driver.refresh()
                     time.sleep(15)
+                    driver.execute_script('window.scrollTo(0, 800);')
+                    time.sleep(2)
+                    driver.execute_script('window.scrollTo(0, 0);')
+                    time.sleep(3)
                 except Exception:
                     pass
             elif attempt == 3:
-                # 4번째 실패: JavaScript로 직접 찾기 시도
+                # 4번째 실패: JavaScript로 직접 체크박스 탐색·클릭
                 try:
                     found = driver.execute_script("""
                         var cbs = document.querySelectorAll("input[type='checkbox']");
@@ -977,6 +1008,7 @@ def select_all_results(driver, stats=None):
                         return True
                 except Exception:
                     pass
+                time.sleep(12)
             else:
                 time.sleep(12)
 
@@ -1296,6 +1328,53 @@ def go_to_next_page(driver, current_page, config):
         return None
 
 
+# ==================== 페이지 내비게이션 (재로그인 후 Angular warm-up) ====================
+def _navigate_with_warmup(driver, base_search_url: str, target_page: int):
+    """재로그인 직후 Angular 콜드 스타트 문제를 해결하는 페이지 이동 방법.
+
+    문제:
+        재로그인 후 검색 결과 중간 페이지(예: pageNumber=21)에 직접 URL로 이동하면
+        IEEE Xplore Angular 앱이 콜드 스타트 상태에서 결과 목록만 렌더링하고
+        results-actions 컴포넌트(Select All 체크박스 포함)를 초기화하지 않는 경우가 있다.
+
+    해결책:
+        1) 페이지 1 에 먼저 방문 → Angular 앱이 정상 초기화
+        2) 스크롤 트리거로 lazy 컴포넌트 활성화
+        3) 목표 페이지로 이동 → Angular 가 이미 초기화된 상태에서 페이지만 변경
+
+    Args:
+        base_search_url : 기준 검색 URL (pageNumber=1 포함)
+        target_page     : 이동할 목표 페이지 번호
+    """
+    def _make_page_url(url, page):
+        if 'pageNumber=' in url:
+            return re.sub(r'pageNumber=\d+', f'pageNumber={page}', url)
+        sep = '&' if '?' in url else '?'
+        return url + sep + f'pageNumber={page}'
+
+    # ── 1단계: 페이지 1 경유 (Angular 초기화) ─────────────────────────────
+    url_p1 = _make_page_url(base_search_url, 1)
+    print(f'[내비] 페이지 1 경유 (Angular warm-up)...')
+    driver.get(url_p1)
+    time.sleep(15)
+    # 스크롤 트리거
+    driver.execute_script('window.scrollTo(0, 400);')
+    time.sleep(2)
+    driver.execute_script('window.scrollTo(0, 0);')
+    time.sleep(3)
+
+    # ── 2단계: 목표 페이지 이동 ──────────────────────────────────────────
+    if target_page > 1:
+        url_target = _make_page_url(base_search_url, target_page)
+        print(f'[내비] 페이지 {target_page} 이동...')
+        driver.get(url_target)
+        time.sleep(15)
+        driver.execute_script('window.scrollTo(0, 400);')
+        time.sleep(2)
+        driver.execute_script('window.scrollTo(0, 0);')
+        time.sleep(3)
+
+
 # ==================== 단일 연도 크롤링 ====================
 def _relogin_and_setup(driver, year, config, username, password,
                        search_term=None, label_match=None, stats=None):
@@ -1359,16 +1438,10 @@ def _crawl_one_journal(driver, year, config, username, password,
         config.base_search_url = driver.current_url
         print(f'[INFO] 기준 검색 URL 저장: {config.base_search_url}')
 
-    # ── start_page > 1 이면 해당 페이지로 직접 이동 (resume) ────────────
+    # ── start_page > 1 이면 warm-up 방식으로 이동 (resume) ──────────────
     if start_page > 1 and hasattr(config, 'base_search_url') and config.base_search_url:
-        resume_url = re.sub(r'pageNumber=\d+', f'pageNumber={start_page}',
-                            config.base_search_url)
-        if 'pageNumber=' not in resume_url:
-            sep = '&' if '?' in resume_url else '?'
-            resume_url = resume_url + sep + f'pageNumber={start_page}'
-        print(f'[RESUME] 페이지 {start_page} 로 직접 이동')
-        driver.get(resume_url)
-        time.sleep(8)
+        print(f'[RESUME] 페이지 {start_page} 로 warm-up 이동')
+        _navigate_with_warmup(driver, config.base_search_url, start_page)
 
     current_page    = start_page
     visited_pages   = 0
@@ -1383,13 +1456,10 @@ def _crawl_one_journal(driver, year, config, username, password,
                 print('[경고] 페이지 처리 중 재로그인 실패 → 저널 크롤링 중단')
                 break
             if hasattr(config, 'base_search_url') and config.base_search_url:
-                page_url = re.sub(r'pageNumber=\d+', f'pageNumber={current_page}',
-                                  config.base_search_url)
-                if 'pageNumber=' not in page_url:
-                    sep = '&' if '?' in page_url else '?'
-                    page_url = page_url + sep + f'pageNumber={current_page}'
-                driver.get(page_url)
-                time.sleep(8)
+                # 재로그인 후 Angular warm-up: 페이지 1 경유 → 목표 페이지
+                # 직접 pageNumber=N 으로 점프하면 Angular 콜드 스타트 상태에서
+                # results-actions(Select All) 컴포넌트가 초기화 안 되는 버그 방지
+                _navigate_with_warmup(driver, config.base_search_url, current_page)
 
         # ── 빈 페이지 감지 (마지막 페이지 초과) ──────────────────────────
         # "전체 선택" 체크박스 자체가 없는 원인: 결과가 0건인 빈 페이지
