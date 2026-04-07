@@ -116,11 +116,16 @@ class CrawlStats:
         self.elapsed_minutes = round((now - self._start_dt).total_seconds() / 60, 2)
 
     def as_row(self):
+        # 실시간 호출 시 현재 시각 기준으로 경과 시간 계산
+        now = datetime.now()
+        end_t   = self.end_time or now.strftime('%H:%M:%S')
+        elapsed = self.elapsed_minutes if self.elapsed_minutes else \
+                  round((now - self._start_dt).total_seconds() / 60, 2)
         return {
             'date':               self.date,
             'start_time':         self.start_time,
-            'end_time':           self.end_time,
-            'elapsed_minutes':    self.elapsed_minutes,
+            'end_time':           end_t,
+            'elapsed_minutes':    elapsed,
             'year_crawled':       self.year_crawled,
             'journal':            self.journal,
             'pages_processed':    self.pages_processed,
@@ -133,22 +138,161 @@ class CrawlStats:
             'session_relogins':     self.session_relogins,
         }
 
+    def checkpoint(self):
+        """현재 통계를 CSV에 즉시 반영 (upsert).
+
+        (date, start_time, year_crawled, journal) 으로 행을 식별해
+        이미 있으면 업데이트, 없으면 추가한다.
+        zip 1건 처리 후마다 호출해 실시간으로 파일을 갱신할 수 있다.
+        """
+        try:
+            MANAGE_FILES_PATH.mkdir(parents=True, exist_ok=True)
+            ym = datetime.now().strftime('%Y_%m')
+            csv_path = MANAGE_FILES_PATH / f'stats_{ym}.csv'
+
+            session_key = (self.date, self.start_time,
+                           str(self.year_crawled), self.journal)
+            rows = []
+            found = False
+
+            if csv_path.exists():
+                with open(csv_path, 'r', newline='', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        key = (row.get('date', ''), row.get('start_time', ''),
+                               row.get('year_crawled', ''), row.get('journal', ''))
+                        if key == session_key:
+                            rows.append(self.as_row())
+                            found = True
+                        else:
+                            rows.append(row)
+
+            if not found:
+                rows.append(self.as_row())
+
+            with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.DictWriter(f, fieldnames=CrawlStats.CSV_COLUMNS)
+                writer.writeheader()
+                writer.writerows(rows)
+
+        except Exception as e:
+            print(f'[경고] 통계 CSV 업데이트 실패: {e}')
+
 
 def write_stats_row(stats: CrawlStats):
-    """월별 CSV 파일에 통계 1행 추가. MANAGE_FILES_PATH 에 저장."""
-    try:
-        MANAGE_FILES_PATH.mkdir(parents=True, exist_ok=True)
-        ym = datetime.now().strftime('%Y_%m')
-        csv_path = MANAGE_FILES_PATH / f'stats_{ym}.csv'
-        file_exists = csv_path.exists()
-        with open(csv_path, 'a', newline='', encoding='utf-8') as f:
-            writer = csv.DictWriter(f, fieldnames=CrawlStats.CSV_COLUMNS)
-            if not file_exists:
-                writer.writeheader()
-            writer.writerow(stats.as_row())
-        print(f'[STATS] {csv_path.name} 에 통계 저장 완료')
-    except Exception as e:
-        print(f'[경고] 통계 CSV 저장 실패: {e}')
+    """저널 완료 시 최종 통계를 CSV에 반영 (checkpoint 의 alias)."""
+    stats.checkpoint()
+    print(f'[STATS] stats_{datetime.now().strftime("%Y_%m")}.csv 최종 저장 완료')
+
+
+# ==================== 진행 상황 추적 (resume 지원) ====================
+class ProgressTracker:
+    """크롤링 진행 상황을 JSON 파일로 추적하며 --resume 재개를 지원한다.
+
+    파일 위치: {save_base}_logs/manage_files/progress_{year}.json
+
+    구조 예시::
+
+        {
+          "IEEE GRSL": {
+            "search_term": "Geoscience and Remote Sensing Letters",
+            "status": "completed",          # in_progress | completed
+            "last_page_completed": 44,
+            "total_pages_found": 44,
+            "pdfs_downloaded": 440,
+            "started_at": "2026-04-06 11:27:03",
+            "last_updated": "2026-04-06 18:45:22"
+          }
+        }
+
+    --resume 동작 방식:
+    - completed 저널: last_page + 1 부터 체크 (신규 논문 존재 여부 확인)
+    - in_progress 저널: last_page_completed + 1 부터 재개
+    - 미기록 저널: 1 페이지부터 시작
+    """
+
+    def __init__(self, save_base_path, year):
+        self.year = str(year)
+        progress_dir = MANAGE_FILES_PATH
+        progress_dir.mkdir(parents=True, exist_ok=True)
+        self.path = progress_dir / f'progress_{year}.json'
+        self.data = self._load()
+
+    def _load(self):
+        if self.path.exists():
+            try:
+                with open(self.path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception:
+                return {}
+        return {}
+
+    def save(self):
+        try:
+            with open(self.path, 'w', encoding='utf-8') as f:
+                json.dump(self.data, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f'[경고] 진행 상황 저장 실패: {e}')
+
+    def get_start_page(self, journal_label: str, resume: bool) -> int:
+        """재개 시 시작 페이지 번호를 반환한다."""
+        if not resume or journal_label not in self.data:
+            return 1
+        entry = self.data[journal_label]
+        status   = entry.get('status', 'not_started')
+        last_pg  = entry.get('last_page_completed', 0)
+        if status == 'completed':
+            start = last_pg + 1
+            print(f'[RESUME] {journal_label[:40]}: 완료 기록 있음 → 신규 논문 체크 (p.{start}~)')
+            return start
+        elif status == 'in_progress':
+            start = max(1, last_pg + 1)
+            print(f'[RESUME] {journal_label[:40]}: 진행 중 → p.{start} 부터 재개')
+            return start
+        return 1
+
+    def update(self, journal_label: str, search_term: str,
+               page_num: int, pdfs_downloaded: int, status: str = 'in_progress'):
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        if journal_label not in self.data:
+            self.data[journal_label] = {'search_term': search_term, 'started_at': now}
+        self.data[journal_label].update({
+            'status':               status,
+            'last_page_completed':  page_num,
+            'pdfs_downloaded':      pdfs_downloaded,
+            'last_updated':         now,
+        })
+        self.save()
+
+    def mark_completed(self, journal_label: str, total_pages: int, total_pdfs: int):
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        entry = self.data.setdefault(journal_label, {})
+        entry.update({
+            'status':              'completed',
+            'last_page_completed': total_pages,
+            'total_pages_found':   total_pages,
+            'total_pdfs':          total_pdfs,
+            'completed_at':        now,
+            'last_updated':        now,
+        })
+        self.save()
+
+    def show_summary(self, journal_targets=None):
+        """진행 상황 요약을 출력한다."""
+        targets = journal_targets or JOURNAL_TARGETS
+        total   = len(targets)
+        completed   = sum(1 for v in self.data.values() if v.get('status') == 'completed')
+        in_progress = sum(1 for v in self.data.values() if v.get('status') == 'in_progress')
+        not_started = total - len(self.data)
+        print(f'\n[진행 상황] {self.path.name}')
+        print(f'  전체 저널 {total}개 | 완료 {completed} | 진행중 {in_progress} | 미시작 {not_started}')
+        for label, info in self.data.items():
+            st   = info.get('status', '?')
+            pg   = info.get('last_page_completed', 0)
+            pdfs = info.get('pdfs_downloaded', 0)
+            upd  = info.get('last_updated', '')[:16]
+            print(f'  {st:12s} | p.{pg:4d} | {pdfs:6d} PDFs | {upd} | {label[:45]}')
+        print()
 
 
 # ==================== 기본 저장 경로 ====================
@@ -378,6 +522,62 @@ def is_session_expired(driver):
         return 'sessionfail' in url or 'exceptproc' in url
     except:
         return False
+
+
+def has_search_results(driver):
+    """현재 페이지에 검색 결과가 있는지 확인.
+
+    빈 페이지(마지막 페이지를 초과한 경우 등)를 감지해 False 를 반환한다.
+    크롤링 루프에서 이 함수가 False 를 반환하면 해당 저널 크롤링을 종료한다.
+    """
+    try:
+        time.sleep(3)
+
+        # ── 결과 항목 요소 확인 ──────────────────────────────────────────
+        result_selectors = [
+            'xpl-result-item',
+            '.List-results-items li',
+            '.result-item',
+            '[class*="result-item"]',
+        ]
+        for sel in result_selectors:
+            items = driver.find_elements(By.CSS_SELECTOR, sel)
+            if len(items) > 0:
+                return True
+
+        # ── "No results" 텍스트 패턴 ──────────────────────────────────────
+        src_lower = driver.page_source.lower()
+        no_result_phrases = [
+            'no results found', '0 results', 'returned no results',
+            'did not match any', 'we could not find', 'no documents found',
+        ]
+        if any(p in src_lower for p in no_result_phrases):
+            print('[감지] 검색 결과 0건 텍스트 발견 → 저널 마지막 페이지 초과')
+            return False
+
+        # ── 결과 헤더에서 숫자 확인 ──────────────────────────────────────
+        header_selectors = [
+            '.Dashboard-header',
+            '.results-count',
+            'span.ng-star-inserted',
+            '[class*="results-header"]',
+        ]
+        for sel in header_selectors:
+            for el in driver.find_elements(By.CSS_SELECTOR, sel):
+                txt = el.text.strip()
+                if txt and ('result' in txt.lower() or ' of ' in txt.lower()):
+                    if re.search(r'\b0\b', txt):
+                        print(f'[감지] 결과 0건 헤더 발견: "{txt}" → 저널 마지막 페이지 초과')
+                        return False
+                    return True
+
+        # 결과 항목도 없고 헤더도 확인 안 됨 → 빈 페이지로 판단
+        print('[감지] 결과 아이템·헤더 미발견 → 빈 페이지 (저널 마지막 페이지 초과)')
+        return False
+
+    except Exception as e:
+        print(f'[경고] 결과 존재 확인 실패 ({e}) → 결과 있다고 가정')
+        return True
 
 
 # ==================== 1단계: 국민대 도서관 로그인 ====================
@@ -1125,13 +1325,20 @@ def _relogin_and_setup(driver, year, config, username, password,
 
 
 def _crawl_one_journal(driver, year, config, username, password,
-                       search_term, label_match, stats):
-    """단일 저널의 전 페이지 다운로드 루프. _do_year_crawl 에서 저널마다 호출."""
+                       search_term, label_match, stats,
+                       progress: 'ProgressTracker | None' = None,
+                       start_page: int = 1):
+    """단일 저널의 전 페이지 다운로드 루프. _do_year_crawl 에서 저널마다 호출.
+
+    Args:
+        progress  : ProgressTracker 인스턴스 (None이면 진행 상황 기록 안 함)
+        start_page: 시작 페이지 번호 (--resume 시 마지막 완료 페이지+1)
+    """
     print(f"\n{'='*60}")
-    print(f'저널 크롤링 시작: {label_match}  ({year}년)')
+    print(f'저널 크롤링 시작: {label_match}  ({year}년, p.{start_page}~)')
     print(f"{'='*60}\n")
 
-    # 검색 + 필터 설정
+    # ── 검색 + 필터 설정 ────────────────────────────────────────────────
     if not setup_ieee_advanced_search(driver, year):
         print(f'[경고] Advanced Search 실패 → 다음 저널로 건너뜀')
         return
@@ -1152,12 +1359,24 @@ def _crawl_one_journal(driver, year, config, username, password,
         config.base_search_url = driver.current_url
         print(f'[INFO] 기준 검색 URL 저장: {config.base_search_url}')
 
-    current_page = config.START_PAGE
-    visited_pages = 0
+    # ── start_page > 1 이면 해당 페이지로 직접 이동 (resume) ────────────
+    if start_page > 1 and hasattr(config, 'base_search_url') and config.base_search_url:
+        resume_url = re.sub(r'pageNumber=\d+', f'pageNumber={start_page}',
+                            config.base_search_url)
+        if 'pageNumber=' not in resume_url:
+            sep = '&' if '?' in resume_url else '?'
+            resume_url = resume_url + sep + f'pageNumber={start_page}'
+        print(f'[RESUME] 페이지 {start_page} 로 직접 이동')
+        driver.get(resume_url)
+        time.sleep(8)
+
+    current_page    = start_page
+    visited_pages   = 0
     page_fail_count = {}
+    last_completed  = start_page - 1   # 마지막으로 완료한 페이지 번호
 
     while visited_pages < config.MAX_PAGE_VISITS:
-        # 세션 만료 체크
+        # ── 세션 만료 체크 ────────────────────────────────────────────────
         if is_session_expired(driver):
             if not _relogin_and_setup(driver, year, config, username, password,
                                       search_term, label_match, stats):
@@ -1172,6 +1391,15 @@ def _crawl_one_journal(driver, year, config, username, password,
                 driver.get(page_url)
                 time.sleep(8)
 
+        # ── 빈 페이지 감지 (마지막 페이지 초과) ──────────────────────────
+        # "전체 선택" 체크박스 자체가 없는 원인: 결과가 0건인 빈 페이지
+        if not has_search_results(driver):
+            print(f'[완료] {label_match}: p.{current_page} 빈 페이지 감지 → 저널 크롤링 종료')
+            if progress:
+                progress.mark_completed(label_match, last_completed,
+                                        stats.pdfs_extracted)
+            break
+
         success = process_current_page(driver, current_page, config, stats=stats)
 
         if not success:
@@ -1185,6 +1413,9 @@ def _crawl_one_journal(driver, year, config, username, password,
                 next_page = go_to_next_page(driver, current_page, config)
                 if next_page is None:
                     print(f'[완료] {label_match} 전체 페이지 처리 완료!')
+                    if progress:
+                        progress.mark_completed(label_match, last_completed,
+                                                stats.pdfs_extracted)
                     break
                 current_page = next_page
             else:
@@ -1192,11 +1423,23 @@ def _crawl_one_journal(driver, year, config, username, password,
                 time.sleep(120)
             continue
 
+        # ── 페이지 성공 처리 ─────────────────────────────────────────────
         page_fail_count[current_page] = 0
+        last_completed = current_page
         visited_pages += 1
+
+        # 진행 상황 및 통계 실시간 업데이트
+        if progress:
+            progress.update(label_match, search_term, current_page,
+                            stats.pdfs_extracted, status='in_progress')
+        stats.checkpoint()   # ← zip 처리 후 CSV 즉시 반영
+
         next_page = go_to_next_page(driver, current_page, config)
         if next_page is None:
             print(f'[완료] {label_match} 전체 페이지 처리 완료!')
+            if progress:
+                progress.mark_completed(label_match, last_completed,
+                                        stats.pdfs_extracted)
             break
         current_page = next_page
 
@@ -1210,13 +1453,19 @@ def _crawl_one_journal(driver, year, config, username, password,
 
 
 def _do_year_crawl(driver, year, config, username, password,
-                   journal_targets=None):
+                   journal_targets=None, resume: bool = False):
     """단일 연도의 크롤링 내부 루프 — 모든 대상 저널을 순회.
 
-    로그인·IEEE 접속이 완료된 driver를 받아 저널마다 검색→필터→다운로드를 수행한다.
+    Args:
+        resume: True이면 progress_{year}.json 을 읽어 완료/진행 중 저널을 처리
     """
     if journal_targets is None:
         journal_targets = JOURNAL_TARGETS
+
+    # 진행 상황 추적기 생성 (resume 여부와 무관하게 항상 기록)
+    progress = ProgressTracker(config.BASE_PATH, year)
+    if resume:
+        progress.show_summary(journal_targets)
 
     # CDP로 해당 연도 다운로드 경로 변경
     try:
@@ -1235,14 +1484,18 @@ def _do_year_crawl(driver, year, config, username, password,
 
     try:
         for idx, (search_term, label_match) in enumerate(journal_targets, 1):
+            # resume 모드: 시작 페이지 결정
+            start_page = progress.get_start_page(label_match, resume)
+
             print(f"\n{'#'*60}")
-            print(f'# [{idx}/{len(journal_targets)}] {label_match}')
+            print(f'# [{idx}/{len(journal_targets)}] {label_match}  (p.{start_page}~)')
             print(f"{'#'*60}")
 
             stats = CrawlStats(year=year, journal=label_match)
             try:
                 _crawl_one_journal(driver, year, config, username, password,
-                                   search_term, label_match, stats)
+                                   search_term, label_match, stats,
+                                   progress=progress, start_page=start_page)
             except KeyboardInterrupt:
                 stats.finalize()
                 write_stats_row(stats)
@@ -1333,12 +1586,19 @@ def parse_args():
     )
 
     parser = argparse.ArgumentParser(
-        description='IEEE TGRS 논문 크롤러 (국민대 성곡도서관 프록시)',
+        description='IEEE 논문 대용량 크롤러 (국민대 성곡도서관 프록시)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 실행 예시:
   python crawling_ieee_2023_2025.py --years 2023 2024 2025
   python crawling_ieee_2023_2025.py --headless --years 2023 2024 2025
+
+  # 중단 후 재개 (이미 완료된 저널은 신규 논문만 체크, 진행 중이던 저널은 이어서)
+  python crawling_ieee_2023_2025.py --headless --resume --years 2023 2024 2025
+
+  # 진행 상황만 출력 (크롤링 실행 안 함)
+  python crawling_ieee_2023_2025.py --status --years 2023 2024 2025
+
   python crawling_ieee_2023_2025.py --year 2024 --save-path /my/dir
   python crawling_ieee_2023_2025.py --year 2023 --username myid --password mypw
         """
@@ -1346,6 +1606,14 @@ def parse_args():
     parser.add_argument(
         '--headless', action='store_true',
         help='브라우저를 화면 없이 백그라운드로 실행 (서버 환경)'
+    )
+    parser.add_argument(
+        '--resume', action='store_true',
+        help='이전 실행에서 중단된 지점부터 재개 (progress_YEAR.json 참조)'
+    )
+    parser.add_argument(
+        '--status', action='store_true',
+        help='크롤링 진행 상황만 출력하고 종료 (실제 크롤링 안 함)'
     )
     parser.add_argument('--year',  type=int, default=None, help='크롤링 단일 연도 (예: 2024)')
     parser.add_argument('--years', type=int, nargs='+', default=None,
@@ -1381,6 +1649,14 @@ def main():
     else:
         save_base_path = DEFAULT_SAVE_PATH_LINUX
 
+    # --status: 진행 상황만 출력하고 종료
+    if args.status:
+        print('\n[진행 상황 조회]')
+        for year in years:
+            pt = ProgressTracker(save_base_path, year)
+            pt.show_summary(JOURNAL_TARGETS)
+        return
+
     # 로그인 정보
     username = args.username
     password = args.password
@@ -1398,12 +1674,14 @@ def main():
             sys.exit(1)
 
     # 시작 요약
+    resume_flag = getattr(args, 'resume', False)
     print('\n' + '='*60)
     print('IEEE 논문 대용량 크롤러 시작')
     print('='*60)
     print(f'  브라우저    : {"headless" if args.headless else "GUI (브라우저 화면 표시)"}')
     print(f'  대상 연도   : {years}')
     print(f'  대상 저널 수 : {len(JOURNAL_TARGETS)}개')
+    print(f'  재개 모드   : {"ON (--resume)" if resume_flag else "OFF (처음부터)"}')
     print(f'  저장 경로   : {save_base_path}')
     print(f'  통계 경로   : {MANAGE_FILES_PATH}')
     print(f'  로그인 ID   : {username}')
@@ -1437,7 +1715,8 @@ def main():
 
             interrupted = False
             try:
-                _do_year_crawl(driver, year, config, username, password)
+                _do_year_crawl(driver, year, config, username, password,
+                               resume=resume_flag)
             except KeyboardInterrupt:
                 interrupted = True
             except Exception:

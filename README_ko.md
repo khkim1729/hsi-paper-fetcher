@@ -7,22 +7,28 @@ Hyperspectral Imaging(HSI) 및 Remote Sensing 관련 논문 PDF 대용량 수집
 ## 목차
 
 1. [프로젝트 구조](#프로젝트-구조)
-2. [IEEE 대용량 크롤링 — 주요 변경 사항](#ieee-대용량-크롤링--주요-변경-사항)
+2. [IEEE 대용량 크롤링 — 1차 개선](#ieee-대용량-크롤링--주요-변경-사항)
    - 2.1 [전체 선택 실패 수정](#21-전체-선택-실패-수정)
    - 2.2 [다수 저널/학회 자동 순회](#22-다수-저널학회-자동-순회)
    - 2.3 [일별 통계 CSV 자동 저장](#23-일별-통계-csv-자동-저장)
    - 2.4 [기타 개선 사항](#24-기타-개선-사항)
-3. [IEEE TGRS 크롤링 전체 흐름](#ieee-tgrs-크롤링-crawling_ieee_2023_2025py)
-4. [빠른 시작](#빠른-시작)
-5. [전체 옵션](#전체-옵션)
-6. [기본 저장 경로](#기본-저장-경로)
-7. [Linux 서버에서 screen으로 실행하기](#linux-서버에서-screen으로-실행하기)
-8. [예상 출력](#예상-출력)
-9. [예상 결과물](#예상-결과물)
-10. [ScienceDirect 크롤링](#sciencedirect-크롤링)
-11. [위키피디아 크롤링](#위키피디아-크롤링)
-12. [토큰 수 계산](#토큰-수-계산)
-13. [변경 이력](#변경-이력)
+3. [IEEE 대용량 크롤링 — 2차 개선](#ieee-대용량-크롤링--2차-개선)
+   - 3.1 [빈 페이지 감지 (전체 선택 루프 개선)](#31-빈-페이지-감지-전체-선택-루프-개선)
+   - 3.2 [통계 CSV 실시간 업데이트](#32-통계-csv-실시간-업데이트)
+   - 3.3 [진행 상황 추적 파일 (progress JSON)](#33-진행-상황-추적-파일-progress-json)
+   - 3.4 [--resume 재개 기능](#34---resume-재개-기능)
+   - 3.5 [--status 진행 상황 확인](#35---status-진행-상황-확인)
+4. [IEEE TGRS 크롤링 전체 흐름](#ieee-tgrs-크롤링-crawling_ieee_2023_2025py)
+5. [빠른 시작](#빠른-시작)
+6. [전체 옵션](#전체-옵션)
+7. [기본 저장 경로](#기본-저장-경로)
+8. [Linux 서버에서 screen으로 실행하기](#linux-서버에서-screen으로-실행하기)
+9. [예상 출력](#예상-출력)
+10. [예상 결과물](#예상-결과물)
+11. [ScienceDirect 크롤링](#sciencedirect-크롤링)
+12. [위키피디아 크롤링](#위키피디아-크롤링)
+13. [토큰 수 계산](#토큰-수-계산)
+14. [변경 이력](#변경-이력)
 
 ---
 
@@ -149,6 +155,152 @@ date,start_time,end_time,elapsed_minutes,year_crawled,journal,pages_processed,pa
 
 ---
 
+## IEEE 대용량 크롤링 — 2차 개선
+
+---
+
+### 3.1 빈 페이지 감지 (전체 선택 루프 개선)
+
+#### 문제
+IEEE GRSL 2023년 크롤링 시 **44페이지가 마지막 페이지**인데, URL을 직접 `pageNumber=45`로 이동하면 결과가 0건인 **빈 페이지**가 로드됩니다.  
+빈 페이지에는 "전체 선택" 체크박스 자체가 존재하지 않아 `TimeoutException` 이 발생하고, 3회 실패 → 46페이지 이동 → 역시 빈 페이지 → **무한 반복** 상태가 됩니다.
+
+```
+[오류] 전체 선택 5회 실패  현재 URL: ...pageNumber=45
+[경고] 페이지 45 3회 연속 실패 → 건너뜀
+→ 페이지 46 이동 (URL 직접)    ← 46도 빈 페이지 → 루프 지속
+```
+
+#### 해결책: `has_search_results()` 함수 추가
+
+페이지 처리 전에 검색 결과가 실제로 존재하는지 먼저 확인합니다.  
+결과가 없으면 **해당 저널 크롤링을 즉시 종료**하고 다음 저널로 넘어갑니다.
+
+```
+감지 방법 (순서대로):
+  1. xpl-result-item, .result-item 등 결과 아이템 요소 탐색 → 있으면 True
+  2. "no results found", "0 results" 등 문자열 패턴 감지 → False
+  3. 결과 헤더(Dashboard-header 등)에서 "0" 숫자 감지 → False
+  4. 위 모두 실패 시 → 빈 페이지로 간주, False
+```
+
+---
+
+### 3.2 통계 CSV 실시간 업데이트
+
+기존에는 **저널 1개 완료 후** CSV에 1행을 추가(append)했습니다.  
+이제는 **zip 파일 1개 처리 후마다** CSV의 해당 세션 행을 즉시 업데이트합니다.
+
+#### 동작 방식
+
+`CrawlStats.checkpoint()` 메서드가 아래 로직으로 CSV를 갱신합니다:
+
+```
+1. stats_YYYY_MM.csv 전체 읽기
+2. (date, start_time, year_crawled, journal) 으로 현재 세션 행 탐색
+   - 찾으면: 해당 행을 최신 수치로 덮어쓰기 (upsert)
+   - 없으면: 새 행 추가 (insert)
+3. 전체 파일 다시 쓰기
+```
+
+덕분에 크롤링 중 언제든 CSV를 열면 **진행 중인 저널의 최신 통계**를 볼 수 있습니다.
+
+```bash
+# 실시간 모니터링 예시
+watch -n 30 'tail -5 /nas1/.../manage_files/stats_2026_04.csv | column -t -s,'
+```
+
+---
+
+### 3.3 진행 상황 추적 파일 (progress JSON)
+
+크롤링 중 **어느 저널의 몇 페이지까지 완료했는지**를 JSON 파일로 기록합니다.
+
+**파일 위치**: `/nas1/.../01_IEEE_TGRS_1980_2025_logs/manage_files/progress_{year}.json`
+
+**파일 예시**:
+```json
+{
+  "IEEE Transactions on Geoscience and Remote Sensing": {
+    "search_term": "Transactions on Geoscience and Remote Sensing",
+    "status": "completed",
+    "last_page_completed": 204,
+    "total_pages_found": 204,
+    "pdfs_downloaded": 2036,
+    "started_at": "2026-04-06 11:27:03",
+    "completed_at": "2026-04-06 14:12:45",
+    "last_updated": "2026-04-06 14:12:45"
+  },
+  "IEEE Geoscience and Remote Sensing Letters": {
+    "search_term": "Geoscience and Remote Sensing Letters",
+    "status": "in_progress",
+    "last_page_completed": 32,
+    "pdfs_downloaded": 320,
+    "started_at": "2026-04-06 14:13:02",
+    "last_updated": "2026-04-06 16:30:11"
+  }
+}
+```
+
+**`status` 값 의미**:
+
+| 값 | 설명 |
+|---|---|
+| `in_progress` | 크롤링 진행 중 (중단됐을 수도 있음) |
+| `completed` | 해당 연도의 모든 페이지 다운로드 완료 |
+
+---
+
+### 3.4 `--resume` 재개 기능
+
+크롤링이 중단됐을 때 처음부터 다시 시작하지 않고, **이전에 완료한 지점부터 이어서** 실행합니다.
+
+```bash
+# 중단 후 재개
+python crawling_ieee_2023_2025.py --headless --resume --years 2023 2024 2025
+```
+
+#### 재개 동작 방식
+
+| 저널 상태 | `--resume` 없을 때 | `--resume` 있을 때 |
+|---|---|---|
+| 미기록 (처음 실행) | p.1 부터 시작 | p.1 부터 시작 |
+| `in_progress` (중단됨) | p.1 부터 **재다운로드** | 마지막 완료 페이지 + 1 부터 이어서 |
+| `completed` (완료됨) | p.1 부터 **재다운로드** | 마지막 페이지 + 1 부터 **신규 논문만 체크** |
+
+> **💡 신규 논문 자동 수집**: `completed` 저널도 완전히 건너뛰지 않고 마지막 페이지 + 1 부터 체크합니다.  
+> 만약 해당 페이지가 빈 페이지면 바로 종료(신규 없음), 결과가 있으면 계속 다운로드합니다.  
+> IEEE에서 새로 발행된 논문이 있어도 자동으로 수집됩니다.
+
+#### 중복 다운로드 방지
+
+`--resume` 없이 재실행해도 **이미 다운로드된 PDF는 자동으로 건너뜁니다**.  
+`unzip_and_cleanup()` 에서 같은 파일명이 이미 존재하면 `duplicates_skipped` 카운트만 올리고 넘어갑니다.  
+단, 이미 완료된 저널의 페이지를 처음부터 다시 방문하므로 **불필요한 페이지 이동이 발생**합니다.  
+시간을 절약하려면 `--resume` 을 사용하세요.
+
+---
+
+### 3.5 `--status` 진행 상황 확인
+
+크롤링을 실행하지 않고 **현재까지의 진행 상황만 출력**합니다.
+
+```bash
+python crawling_ieee_2023_2025.py --status --years 2023 2024 2025
+```
+
+출력 예시:
+```
+[진행 상황] progress_2023.json
+  전체 저널 30개 | 완료 5 | 진행중 1 | 미시작 24
+  completed    | p. 204 |   2036 PDFs | 2026-04-06 14:12 | IEEE Transactions on Geoscience...
+  completed    | p.  44 |    440 PDFs | 2026-04-06 15:30 | IEEE Geoscience and Remote Sen...
+  in_progress  | p.  32 |    320 PDFs | 2026-04-06 16:30 | IEEE Journal of Selected Topics...
+  ...
+```
+
+---
+
 ## IEEE TGRS 크롤링 (`crawling_ieee_2023_2025.py`)
 
 ### 전체 흐름
@@ -229,6 +381,8 @@ python crawling_ieee_2023_2025.py --year 2023 --username myid --password mypw
 | 옵션 | 설명 |
 |------|------|
 | `--headless` | 브라우저를 화면 없이 실행 (서버용) |
+| `--resume` | 이전 중단 지점부터 재개 (`progress_YEAR.json` 참조) |
+| `--status` | 진행 상황만 출력하고 종료 (크롤링 안 함) |
 | `--year INT` | 단일 연도 (예: `--year 2024`) |
 | `--years INT...` | 복수 연도 (예: `--years 2023 2024 2025`) |
 | `--save-path PATH` | PDF 저장 기본 경로 |
@@ -412,6 +566,17 @@ python tiktoken/scripts/json_token_counter.py "파일.json"
 ---
 
 ## 변경 이력
+
+### 빈 페이지 감지 + 통계 실시간 업데이트 + resume 재개 기능
+
+- **`has_search_results()` 추가**: 결과 0건 빈 페이지에서 "전체 선택" 무한 실패하던 문제 해결. 빈 페이지 감지 즉시 저널 루프 종료
+- **`CrawlStats.checkpoint()` 추가**: zip 1건 처리 후마다 `stats_YYYY_MM.csv` 를 upsert (세션 행 in-place 업데이트). 실시간 모니터링 가능
+- **`ProgressTracker` 클래스 추가**: 저널별 진행 상황을 `manage_files/progress_{year}.json` 에 실시간 기록
+- **`--resume` 플래그 추가**: 이전 실행에서 중단된 지점부터 재개. 완료 저널은 신규 논문만 체크
+- **`--status` 플래그 추가**: 진행 상황만 출력하고 종료 (크롤링 실행 안 함)
+- **README_ko.md 2차 개선 내용 추가** (3.1~3.5 섹션)
+
+---
 
 ### 대용량 수집 체계 구축 — 다수 저널 순회 + 전체 선택 수정 + 통계 CSV
 
