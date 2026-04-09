@@ -315,49 +315,143 @@ IEEE_PROXY_HOME   = 'https://ieeexplore-ieee-org-ssl.proxy.kookmin.ac.kr/Xplore/
 # ==================== 통계 CSV 저장 경로 ====================
 MANAGE_FILES_PATH = Path('/nas1/hyperspectral_literature_data_collected/01_IEEE_TGRS_1980_2025_logs/manage_files')
 
-# ==================== 대상 저널/학회 목록 ====================
-# (Publication Title 필터에 입력할 검색어, 클릭할 레이블에서 일치시킬 텍스트)
-JOURNAL_TARGETS = [
-    # --- Remote Sensing 핵심 저널 ---
+# ==================== 대상 저널/학회 목록 (초분광 관련도 순위 정렬, 50개) ====================
+# 형식: (Publication Title 필터 검색어, 클릭할 레이블 일치 텍스트)
+# 초분광(HSI)·원격탐사(RS) 관련도 기준으로 50개 저널을 Tier 1~10 순위 정렬
+# --num-journals 10|15|20|25|30|35|40|45|50 옵션으로 상위 N개 사용 (기본 30개)
+JOURNAL_TARGETS_ALL = [
+    # ── Tier 1 (1~10): 초분광·원격탐사 핵심 저널 ──────────────────────────
     ("Transactions on Geoscience and Remote Sensing",   "IEEE Transactions on Geoscience and Remote Sensing"),
     ("Geoscience and Remote Sensing Letters",           "IEEE Geoscience and Remote Sensing Letters"),
     ("Selected Topics in Applied Earth",                "IEEE Journal of Selected Topics in Applied Earth Observations"),
-    # --- 이미지 처리 / 컴퓨터 비전 ---
+    ("Sensors Journal",                                 "IEEE Sensors Journal"),
+    ("IEEE Access",                                     "IEEE Access"),
+    ("IGARSS",                                          "IGARSS"),
     ("Transactions on Image Processing",                "IEEE Transactions on Image Processing"),
     ("Transactions on Pattern Analysis",                "IEEE Transactions on Pattern Analysis and Machine Intelligence"),
-    ("Transactions on Multimedia",                      "IEEE Transactions on Multimedia"),
-    ("Circuits and Systems for Video",                  "IEEE Transactions on Circuits and Systems for Video Technology"),
-    # --- 신호 처리 ---
-    ("Transactions on Signal Processing",               "IEEE Transactions on Signal Processing"),
-    ("Signal Processing Letters",                       "IEEE Signal Processing Letters"),
-    ("Selected Topics in Signal Processing",            "IEEE Journal of Selected Topics in Signal Processing"),
-    # --- 광학/포토닉스/센서 ---
-    ("Sensors Journal",                                 "IEEE Sensors Journal"),
-    ("Photonics Journal",                               "IEEE Photonics Journal"),
-    ("Photonics Technology Letters",                    "IEEE Photonics Technology Letters"),
-    # --- 측정/계측/항공우주 ---
-    ("Instrumentation and Measurement",                 "IEEE Transactions on Instrumentation and Measurement"),
-    ("Aerospace and Electronic Systems",                "IEEE Transactions on Aerospace and Electronic Systems"),
-    ("Systems Journal",                                 "IEEE Systems Journal"),
-    # --- AI / 머신러닝 ---
     ("Neural Networks and Learning",                    "IEEE Transactions on Neural Networks and Learning Systems"),
-    ("Transactions on Cybernetics",                     "IEEE Transactions on Cybernetics"),
-    ("Transactions on Emerging Topics in Computational","IEEE Transactions on Emerging Topics in Computational Intelligence"),
-    ("Transactions on Artificial Intelligence",         "IEEE Transactions on Artificial Intelligence"),
-    # --- 일반/대형 저널 ---
-    ("IEEE Access",                                     "IEEE Access"),
-    ("Proceedings of the IEEE",                         "Proceedings of the IEEE"),
-    # --- 학회/Conference ---
-    ("IGARSS",                                          "IGARSS"),
+    ("Geoscience and Remote Sensing Magazine",          "IEEE Geoscience and Remote Sensing Magazine"),
+    # ── Tier 2 (11~15): 신호 처리·계산 영상 ──────────────────────────────
+    ("Selected Topics in Signal Processing",            "IEEE Journal of Selected Topics in Signal Processing"),
+    ("Transactions on Signal Processing",               "IEEE Transactions on Signal Processing"),
+    ("Transactions on Computational Imaging",           "IEEE Transactions on Computational Imaging"),
+    ("Photonics Journal",                               "IEEE Photonics Journal"),
     ("International Conference on Image Processing",    "IEEE International Conference on Image Processing"),
+    # ── Tier 3 (16~20): 항공우주·측정·컴퓨터 비전 학회 ──────────────────────
+    ("Aerospace and Electronic Systems",                "IEEE Transactions on Aerospace and Electronic Systems"),
+    ("Transactions on Multimedia",                      "IEEE Transactions on Multimedia"),
     ("CVPR",                                            "IEEE/CVF Conference on Computer Vision and Pattern Recognition"),
     ("ICCV",                                            "IEEE/CVF International Conference on Computer Vision"),
+    ("Instrumentation and Measurement",                 "IEEE Transactions on Instrumentation and Measurement"),
+    # ── Tier 4 (21~25): 영상 처리·의료·산업 저널 ─────────────────────────
+    ("Circuits and Systems for Video",                  "IEEE Transactions on Circuits and Systems for Video Technology"),
+    ("Proceedings of the IEEE",                         "Proceedings of the IEEE"),
+    ("Signal Processing Letters",                       "IEEE Signal Processing Letters"),
+    ("Transactions on Medical Imaging",                 "IEEE Transactions on Medical Imaging"),
+    ("Transactions on Industrial Electronics",          "IEEE Transactions on Industrial Electronics"),
+    # ── Tier 5 (26~30): AI·로보틱스·광학 ──────────────────────────────────
+    ("Transactions on Cybernetics",                     "IEEE Transactions on Cybernetics"),
+    ("Transactions on Artificial Intelligence",         "IEEE Transactions on Artificial Intelligence"),
+    ("Transactions on Emerging Topics in Computational","IEEE Transactions on Emerging Topics in Computational Intelligence"),
+    ("Photonics Technology Letters",                    "IEEE Photonics Technology Letters"),
+    ("Robotics and Automation Letters",                 "IEEE Robotics and Automation Letters"),
+    # ── Tier 6 (31~35): 학회·오픈 저널 ────────────────────────────────────
     ("ICASSP",                                          "ICASSP"),
     ("International Geoscience",                        "International Geoscience and Remote Sensing Symposium"),
-    # --- 기타 관련 저널 ---
-    ("Transactions on Medical Imaging",                 "IEEE Transactions on Medical Imaging"),
+    ("Transactions on Big Data",                        "IEEE Transactions on Big Data"),
+    ("Winter Conference on Applications of Computer",   "IEEE Winter Conference on Applications of Computer Vision"),
+    ("Systems Journal",                                 "IEEE Systems Journal"),
+    # ── Tier 7 (36~40): 해양·지속가능·광통신·산업 저널 ─────────────────────
     ("Journal of Oceanic Engineering",                  "IEEE Journal of Oceanic Engineering"),
     ("Transactions on Sustainable Energy",              "IEEE Transactions on Sustainable Energy"),
+    ("Journal of Lightwave Technology",                 "Journal of Lightwave Technology"),
+    ("Transactions on Industrial Informatics",          "IEEE Transactions on Industrial Informatics"),
+    ("Open Journal of Signal",                          "IEEE Open Journal of Signal and Information Processing"),
+    # ── Tier 8 (41~45): 방송·메카트로닉스·신호처리 매거진 ─────────────────
+    ("Signal Processing Magazine",                      "IEEE Signal Processing Magazine"),
+    ("Aerospace Conference",                            "IEEE Aerospace Conference"),
+    ("Transactions on Broadcasting",                    "IEEE Transactions on Broadcasting"),
+    ("Mechatronics",                                    "IEEE/ASME Transactions on Mechatronics"),
+    ("Machine Learning for Signal Processing",          "IEEE International Workshop on Machine Learning for Signal Processing"),
+    # ── Tier 9 (46~50): 추가 확장 커버리지 ──────────────────────────────────
+    ("Transactions on Radiation and Plasma",            "IEEE Transactions on Radiation and Plasma Medical Sciences"),
+    ("Transactions on Smart Grid",                      "IEEE Transactions on Smart Grid"),
+    ("Transactions on Antennas and Propagation",        "IEEE Transactions on Antennas and Propagation"),
+    ("Transactions on Microwave Theory",                "IEEE Transactions on Microwave Theory and Techniques"),
+    ("Latin America Transactions",                      "IEEE Latin America Transactions"),
+]
+
+# 하위 호환성을 위한 기본 저널 리스트 (상위 30개, --num-journals 기본값)
+JOURNAL_TARGETS = JOURNAL_TARGETS_ALL[:30]
+
+# ==================== 키워드 기반 검색 목록 (--with-keywords / --keywords-only 옵션용) ====================
+# IEEE Xplore 전체에서 키워드로 검색 → 저널 필터 없이 관련 논문 대량 수집
+# 초분광·원격탐사 관련 50개 키워드 (저널 목록에 없는 저널의 논문도 포함)
+KEYWORD_SEARCH_TERMS = [
+    # ── 초분광 핵심 ──────────────────────────────────────────────────────
+    "hyperspectral imaging",
+    "hyperspectral remote sensing",
+    "hyperspectral image classification",
+    "hyperspectral image analysis",
+    "hyperspectral unmixing",
+    "hyperspectral anomaly detection",
+    "hyperspectral target detection",
+    "hyperspectral band selection",
+    "hyperspectral feature extraction",
+    # ── 다분광·스펙트럼 ───────────────────────────────────────────────────
+    "multispectral imaging",
+    "spectral imaging",
+    "spectral analysis remote sensing",
+    "spectral unmixing",
+    "spectral super resolution",
+    # ── 위성·항공·드론 원격탐사 ──────────────────────────────────────────
+    "remote sensing image classification",
+    "satellite image analysis",
+    "aerial image analysis",
+    "UAV remote sensing",
+    "drone remote sensing",
+    # ── SAR / 레이더 ──────────────────────────────────────────────────────
+    "SAR image processing",
+    "synthetic aperture radar remote sensing",
+    "PolSAR classification",
+    "InSAR deformation",
+    "SAR change detection",
+    # ── LiDAR / 3D 포인트클라우드 ────────────────────────────────────────
+    "LiDAR remote sensing",
+    "point cloud classification",
+    "3D point cloud deep learning",
+    # ── 딥러닝 방법론 (원격탐사 적용) ─────────────────────────────────────
+    "deep learning remote sensing",
+    "convolutional neural network remote sensing",
+    "transformer remote sensing",
+    "attention mechanism remote sensing",
+    "generative adversarial network remote sensing",
+    "self-supervised learning remote sensing",
+    # ── 토지·환경 응용 ────────────────────────────────────────────────────
+    "land cover classification remote sensing",
+    "land use change detection",
+    "vegetation mapping remote sensing",
+    "crop monitoring remote sensing",
+    "precision agriculture remote sensing",
+    "forest monitoring remote sensing",
+    # ── 도시·재해 응용 ────────────────────────────────────────────────────
+    "urban remote sensing",
+    "building extraction remote sensing",
+    "road extraction remote sensing",
+    "flood detection remote sensing",
+    "wildfire detection satellite",
+    "change detection satellite imagery",
+    # ── 해양·빙설·토양 응용 ──────────────────────────────────────────────
+    "ocean remote sensing",
+    "sea ice remote sensing",
+    "snow cover remote sensing",
+    "soil moisture estimation remote sensing",
+    # ── 의료·광학 응용 ────────────────────────────────────────────────────
+    "medical hyperspectral imaging",
+    "mineral mapping hyperspectral",
+    "image fusion remote sensing",
+    "pansharpening satellite",
+    "super resolution remote sensing",
 ]
 
 
@@ -379,7 +473,8 @@ class CrawlConfig:
         self.MAX_RANDOM_DELAY       = 8
         self.MAX_PAGE_VISITS        = 9999   # 사실상 무제한 (전체 페이지 다운)
         self.MAX_SEAT_LIMIT_RETRIES = 5
-        self.MAX_PAGE_RETRIES       = 3   # 페이지 연속 실패 시 건너뜀 한계
+        self.MAX_PAGE_RETRIES            = 3   # 페이지 연속 실패 시 건너뜀 한계
+        self.MAX_CONSECUTIVE_PAGE_FAILS  = 3   # 연속 N페이지 전체 실패 → 저널/키워드 크롤링 중단
 
         Path(self.SAVE_PATH).mkdir(parents=True, exist_ok=True)
         print(f"[저장 경로] {self.SAVE_PATH}")
@@ -840,6 +935,53 @@ def apply_publication_filter(driver, search_term, label_match=None):
     except Exception as e:
         print(f'[경고] 저널 필터 적용 실패 (계속 진행): {e}')
         return False
+
+
+# ==================== 키워드 기반 검색 설정 ====================
+def setup_keyword_search(driver, year, keyword):
+    """키워드 기반 IEEE Xplore 검색 URL로 직접 이동 (저널 필터 없음).
+
+    Publication Title 필터를 사용하지 않고 queryText 에 키워드를 넣어 검색.
+    전체 IEEE 저널·학회에서 관련 논문을 수집할 때 사용한다.
+
+    Returns:
+        base_search_url (str): 성공 시 기준 검색 URL (pageNumber=1)
+        None: 실패 시
+    """
+    import urllib.parse
+
+    try:
+        cur = driver.current_url
+        if 'ieeexplore' in cur.lower():
+            if '/search' in cur:
+                base = cur.split('/search')[0]
+            elif '/Xplore' in cur:
+                base = cur.split('/Xplore')[0]
+            else:
+                # 경로 끝 제거
+                base = cur.rsplit('/', 1)[0]
+        else:
+            base = 'https://ieeexplore-ieee-org-ssl.proxy.kookmin.ac.kr'
+
+        q = urllib.parse.quote(keyword, safe='')
+        url = (f'{base}/search/searchresult.jsp?action=search'
+               f'&newsearch=true&ranges={year}_{year}_Year'
+               f'&queryText={q}&pageSize=10&pageNumber=1')
+
+        print(f'[키워드검색] "{keyword}" ({year}년) → URL 직접 이동')
+        driver.get(url)
+        time.sleep(12)
+        WebDriverWait(driver, 20).until(
+            lambda d: d.execute_script('return document.readyState') == 'complete'
+        )
+        driver.execute_script('window.scrollTo(0, 0);')
+        time.sleep(3)
+        print(f'[OK] 키워드 검색 준비 완료')
+        return url
+
+    except Exception as e:
+        print(f'[오류] 키워드 검색 설정 실패: {e}')
+        return None
 
 
 # ==================== 5단계: Items Per Page ====================
@@ -1443,10 +1585,11 @@ def _crawl_one_journal(driver, year, config, username, password,
         print(f'[RESUME] 페이지 {start_page} 로 warm-up 이동')
         _navigate_with_warmup(driver, config.base_search_url, start_page)
 
-    current_page    = start_page
-    visited_pages   = 0
-    page_fail_count = {}
-    last_completed  = start_page - 1   # 마지막으로 완료한 페이지 번호
+    current_page      = start_page
+    visited_pages     = 0
+    page_fail_count   = {}
+    consecutive_fails = 0   # 연속으로 완전 실패(MAX_PAGE_RETRIES 소진)한 페이지 수
+    last_completed    = start_page - 1   # 마지막으로 완료한 페이지 번호
 
     while visited_pages < config.MAX_PAGE_VISITS:
         # ── 세션 만료 체크 ────────────────────────────────────────────────
@@ -1476,7 +1619,21 @@ def _crawl_one_journal(driver, year, config, username, password,
             fails = page_fail_count.get(current_page, 0) + 1
             page_fail_count[current_page] = fails
             if fails >= config.MAX_PAGE_RETRIES:
-                print(f'[경고] 페이지 {current_page} {fails}회 연속 실패 → 건너뜀')
+                consecutive_fails += 1
+                print(f'[경고] 페이지 {current_page} {fails}회 실패 → 건너뜀 '
+                      f'(연속 {consecutive_fails}페이지 완전 실패)')
+
+                # ── 연속 실패 한도 초과: 다운로드 할당량 소진 또는 UI 오류 ──
+                # Select All 체크박스가 없는 상태(세션 한도·프록시 제한)에서
+                # 페이지를 계속 시도해도 개선되지 않으므로 저널을 건너뜀.
+                if consecutive_fails >= config.MAX_CONSECUTIVE_PAGE_FAILS:
+                    print(f'[중단] {consecutive_fails}페이지 연속 전체 실패 → '
+                          f'다운로드 한도 소진 또는 UI 오류로 판단, 저널 크롤링 중단')
+                    if progress:
+                        progress.update(label_match, search_term, last_completed,
+                                        stats.pdfs_extracted, status='in_progress')
+                    break
+
                 if stats is not None:
                     stats.pages_skipped += 1
                 visited_pages += 1
@@ -1494,6 +1651,7 @@ def _crawl_one_journal(driver, year, config, username, password,
             continue
 
         # ── 페이지 성공 처리 ─────────────────────────────────────────────
+        consecutive_fails = 0   # 성공 시 연속 실패 카운터 리셋
         page_fail_count[current_page] = 0
         last_completed = current_page
         visited_pages += 1
@@ -1522,15 +1680,140 @@ def _crawl_one_journal(driver, year, config, username, password,
     print(f"{'='*60}\n")
 
 
-def _do_year_crawl(driver, year, config, username, password,
-                   journal_targets=None, resume: bool = False):
-    """단일 연도의 크롤링 내부 루프 — 모든 대상 저널을 순회.
+def _crawl_by_keyword(driver, year, config, username, password,
+                      keyword, stats,
+                      progress=None, start_page: int = 1):
+    """키워드 기반 IEEE 전체 검색 결과 다운로드 루프.
+
+    Publication Title 필터 없이 키워드(queryText)로만 검색해
+    전체 IEEE 저널·학회에서 관련 논문을 수집한다.
+    로직은 _crawl_one_journal 과 동일하나 설정 단계가 간략하다.
 
     Args:
-        resume: True이면 progress_{year}.json 을 읽어 완료/진행 중 저널을 처리
+        keyword   : IEEE Xplore queryText 검색어
+        stats     : CrawlStats 인스턴스 (외부에서 생성해 전달)
+        progress  : ProgressTracker 인스턴스 (None이면 진행 상황 기록 안 함)
+        start_page: 시작 페이지 (--resume 시 마지막 완료 페이지+1)
     """
+    label = f'[KW] {keyword}'
+
+    print(f"\n{'='*60}")
+    print(f'키워드 크롤링 시작: "{keyword}"  ({year}년, p.{start_page}~)')
+    print(f"{'='*60}\n")
+
+    # ── 키워드 검색 URL 설정 ───────────────────────────────────────────────
+    if is_session_expired(driver):
+        if not _relogin_and_setup(driver, year, config, username, password, stats=stats):
+            print('[경고] 재로그인 실패 → 키워드 크롤링 건너뜀')
+            return
+
+    base_url = setup_keyword_search(driver, year, keyword)
+    if base_url is None:
+        print(f'[경고] 키워드 "{keyword}" 검색 설정 실패 → 다음 키워드로 건너뜀')
+        return
+
+    config.base_search_url = base_url
+
+    # ── start_page > 1 이면 warm-up 방식으로 이동 (resume) ──────────────
+    if start_page > 1:
+        print(f'[RESUME] 키워드 "{keyword}" p.{start_page} 로 warm-up 이동')
+        _navigate_with_warmup(driver, base_url, start_page)
+
+    current_page      = start_page
+    visited_pages     = 0
+    page_fail_count   = {}
+    consecutive_fails = 0
+    last_completed    = start_page - 1
+
+    while visited_pages < config.MAX_PAGE_VISITS:
+        # ── 세션 만료 체크 ─────────────────────────────────────────────────
+        if is_session_expired(driver):
+            if not _relogin_and_setup(driver, year, config, username, password, stats=stats):
+                print('[경고] 재로그인 실패 → 키워드 크롤링 중단')
+                break
+            new_url = setup_keyword_search(driver, year, keyword)
+            if new_url:
+                base_url = new_url
+                config.base_search_url = base_url
+                _navigate_with_warmup(driver, base_url, current_page)
+
+        # ── 빈 페이지 감지 ─────────────────────────────────────────────────
+        if not has_search_results(driver):
+            print(f'[완료] 키워드 "{keyword}": p.{current_page} 빈 페이지 → 크롤링 종료')
+            if progress:
+                progress.mark_completed(label, last_completed, stats.pdfs_extracted)
+            break
+
+        success = process_current_page(driver, current_page, config, stats=stats)
+
+        if not success:
+            fails = page_fail_count.get(current_page, 0) + 1
+            page_fail_count[current_page] = fails
+            if fails >= config.MAX_PAGE_RETRIES:
+                consecutive_fails += 1
+                print(f'[경고] 페이지 {current_page} {fails}회 실패 → 건너뜀 '
+                      f'(연속 {consecutive_fails}페이지 실패)')
+                if consecutive_fails >= config.MAX_CONSECUTIVE_PAGE_FAILS:
+                    print(f'[중단] {consecutive_fails}페이지 연속 실패 → 키워드 크롤링 중단')
+                    if progress:
+                        progress.update(label, keyword, last_completed,
+                                        stats.pdfs_extracted, status='in_progress')
+                    break
+                stats.pages_skipped += 1
+                visited_pages += 1
+                next_page = go_to_next_page(driver, current_page, config)
+                if next_page is None:
+                    if progress:
+                        progress.mark_completed(label, last_completed, stats.pdfs_extracted)
+                    break
+                current_page = next_page
+            else:
+                print(f'[경고] 페이지 {current_page} 실패 ({fails}/{config.MAX_PAGE_RETRIES}), 2분 대기')
+                time.sleep(120)
+            continue
+
+        # ── 페이지 성공 처리 ──────────────────────────────────────────────
+        consecutive_fails = 0
+        page_fail_count[current_page] = 0
+        last_completed = current_page
+        visited_pages += 1
+
+        if progress:
+            progress.update(label, keyword, current_page,
+                            stats.pdfs_extracted, status='in_progress')
+        stats.checkpoint()
+
+        next_page = go_to_next_page(driver, current_page, config)
+        if next_page is None:
+            print(f'[완료] 키워드 "{keyword}" 전체 페이지 처리 완료!')
+            if progress:
+                progress.mark_completed(label, last_completed, stats.pdfs_extracted)
+            break
+        current_page = next_page
+
+    end_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    print(f"\n{'='*60}")
+    print(f'[완료] 키워드 "{keyword}" ({year}년)  종료: {end_ts}')
+    print(f"  페이지: {stats.pages_processed}개 완료, {stats.pages_skipped}개 건너뜀")
+    print(f"  PDF: {stats.pdfs_extracted}개 추출, {stats.duplicates_skipped}개 중복")
+    print(f"  Zip: {stats.zip_downloads}개  전체선택실패: {stats.select_all_failures}회")
+    print(f"{'='*60}\n")
+
+
+def _do_year_crawl(driver, year, config, username, password,
+                   journal_targets=None, num_journals=None,
+                   keyword_targets=None, resume: bool = False):
+    """단일 연도의 크롤링 내부 루프 — 모든 대상 저널 + (옵션) 키워드를 순회.
+
+    Args:
+        num_journals  : 사용할 저널 수 (JOURNAL_TARGETS_ALL[:n] 기준). None이면 30개.
+        keyword_targets: 키워드 기반 크롤링 목록 (None이면 키워드 크롤링 건너뜀).
+        resume        : True이면 progress_{year}.json 을 읽어 완료/진행 중 항목을 재개.
+    """
+    # 저널 타겟 결정
     if journal_targets is None:
-        journal_targets = JOURNAL_TARGETS
+        n = num_journals if num_journals is not None else 30
+        journal_targets = JOURNAL_TARGETS_ALL[:n]
 
     # 진행 상황 추적기 생성 (resume 여부와 무관하게 항상 기록)
     progress = ProgressTracker(config.BASE_PATH, year)
@@ -1585,9 +1868,49 @@ def _do_year_crawl(driver, year, config, username, password,
 
         end_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         print(f"\n{'='*60}")
-        print(f'{year}년 전체 저널 크롤링 완료!  저장 경로: {config.SAVE_PATH}')
+        print(f'{year}년 저널 크롤링 완료!  저장 경로: {config.SAVE_PATH}')
         print(f'종료 시각: {end_ts}')
         print(f"{'='*60}\n")
+
+        # ── 키워드 기반 추가 크롤링 ─────────────────────────────────────────
+        if keyword_targets:
+            print(f"\n{'#'*60}")
+            print(f'# {year}년 키워드 기반 크롤링 시작 ({len(keyword_targets)}개 키워드)')
+            print(f"{'#'*60}\n")
+
+            for kw_idx, keyword in enumerate(keyword_targets, 1):
+                label = f'[KW] {keyword}'
+                start_page = progress.get_start_page(label, resume)
+
+                print(f"\n{'#'*60}")
+                print(f'# [KW {kw_idx}/{len(keyword_targets)}] "{keyword}"  (p.{start_page}~)')
+                print(f"{'#'*60}")
+
+                stats = CrawlStats(year=year, journal=label)
+                try:
+                    _crawl_by_keyword(driver, year, config, username, password,
+                                      keyword, stats,
+                                      progress=progress, start_page=start_page)
+                except KeyboardInterrupt:
+                    stats.finalize()
+                    write_stats_row(stats)
+                    raise
+                except Exception as e:
+                    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    print(f'[ERROR] 키워드 "{keyword}" 크롤링 실패 [{ts}]: {e}')
+                    traceback.print_exc()
+                finally:
+                    stats.finalize()
+                    write_stats_row(stats)
+
+                if kw_idx < len(keyword_targets):
+                    print('[대기] 다음 키워드 전 10초 대기...')
+                    time.sleep(10)
+
+            kw_end_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            print(f"\n{'='*60}")
+            print(f'{year}년 키워드 크롤링 완료!  종료 시각: {kw_end_ts}')
+            print(f"{'='*60}\n")
 
     except KeyboardInterrupt:
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -1663,10 +1986,19 @@ def parse_args():
   python crawling_ieee_2023_2025.py --years 2023 2024 2025
   python crawling_ieee_2023_2025.py --headless --years 2023 2024 2025
 
-  # 중단 후 재개 (이미 완료된 저널은 신규 논문만 체크, 진행 중이던 저널은 이어서)
+  # 중단 후 재개
   python crawling_ieee_2023_2025.py --headless --resume --years 2023 2024 2025
 
-  # 진행 상황만 출력 (크롤링 실행 안 함)
+  # 저널 수 지정 (초분광 관련도 순위 기준 상위 N개)
+  python crawling_ieee_2023_2025.py --headless --num-journals 50 --years 2023 2024 2025
+
+  # 저널 + 키워드 기반 동시 크롤링 (PDF 수집량 대폭 확대)
+  python crawling_ieee_2023_2025.py --headless --num-journals 30 --with-keywords --years 2024 2025
+
+  # 키워드 기반 크롤링만 실행 (저널 크롤링 건너뜀)
+  python crawling_ieee_2023_2025.py --headless --keywords-only --years 2024 2025
+
+  # 진행 상황만 출력
   python crawling_ieee_2023_2025.py --status --years 2023 2024 2025
 
   python crawling_ieee_2023_2025.py --year 2024 --save-path /my/dir
@@ -1684,6 +2016,20 @@ def parse_args():
     parser.add_argument(
         '--status', action='store_true',
         help='크롤링 진행 상황만 출력하고 종료 (실제 크롤링 안 함)'
+    )
+    parser.add_argument(
+        '--num-journals', type=int, default=30,
+        choices=[10, 15, 20, 25, 30, 35, 40, 45, 50],
+        metavar='{10,15,20,25,30,35,40,45,50}',
+        help='크롤링할 저널 수 (초분광 관련도 순위 상위 N개, 기본값: 30)'
+    )
+    parser.add_argument(
+        '--with-keywords', action='store_true',
+        help='저널 크롤링 후 키워드 기반 추가 크롤링 실행 (PDF 수집량 대폭 확대)'
+    )
+    parser.add_argument(
+        '--keywords-only', action='store_true',
+        help='키워드 기반 크롤링만 실행 (저널 크롤링 건너뜀)'
     )
     parser.add_argument('--year',  type=int, default=None, help='크롤링 단일 연도 (예: 2024)')
     parser.add_argument('--years', type=int, nargs='+', default=None,
@@ -1719,12 +2065,26 @@ def main():
     else:
         save_base_path = DEFAULT_SAVE_PATH_LINUX
 
+    # --num-journals / --keywords-only 처리
+    num_journals   = args.num_journals
+    with_keywords  = args.with_keywords
+    keywords_only  = args.keywords_only
+
+    if keywords_only and with_keywords:
+        print('[오류] --with-keywords 와 --keywords-only 를 동시에 사용할 수 없습니다.')
+        sys.exit(1)
+
+    # 실제 사용할 저널 수 결정
+    effective_num_journals = 0 if keywords_only else num_journals
+    effective_keywords     = KEYWORD_SEARCH_TERMS if (with_keywords or keywords_only) else None
+    effective_targets      = JOURNAL_TARGETS_ALL[:effective_num_journals] if effective_num_journals > 0 else []
+
     # --status: 진행 상황만 출력하고 종료
     if args.status:
         print('\n[진행 상황 조회]')
         for year in years:
             pt = ProgressTracker(save_base_path, year)
-            pt.show_summary(JOURNAL_TARGETS)
+            pt.show_summary(effective_targets or JOURNAL_TARGETS_ALL[:num_journals])
         return
 
     # 로그인 정보
@@ -1745,12 +2105,18 @@ def main():
 
     # 시작 요약
     resume_flag = getattr(args, 'resume', False)
+    kw_mode = ('키워드만' if keywords_only else
+                '저널+키워드' if with_keywords else '저널만')
     print('\n' + '='*60)
     print('IEEE 논문 대용량 크롤러 시작')
     print('='*60)
     print(f'  브라우저    : {"headless" if args.headless else "GUI (브라우저 화면 표시)"}')
     print(f'  대상 연도   : {years}')
-    print(f'  대상 저널 수 : {len(JOURNAL_TARGETS)}개')
+    print(f'  크롤링 모드 : {kw_mode}')
+    if not keywords_only:
+        print(f'  저널 수     : {effective_num_journals}개 (초분광 관련도 순위 상위)')
+    if effective_keywords:
+        print(f'  키워드 수   : {len(effective_keywords)}개')
     print(f'  재개 모드   : {"ON (--resume)" if resume_flag else "OFF (처음부터)"}')
     print(f'  저장 경로   : {save_base_path}')
     print(f'  통계 경로   : {MANAGE_FILES_PATH}')
@@ -1786,6 +2152,9 @@ def main():
             interrupted = False
             try:
                 _do_year_crawl(driver, year, config, username, password,
+                               journal_targets=effective_targets if effective_targets else None,
+                               num_journals=effective_num_journals,
+                               keyword_targets=effective_keywords,
                                resume=resume_flag)
             except KeyboardInterrupt:
                 interrupted = True
