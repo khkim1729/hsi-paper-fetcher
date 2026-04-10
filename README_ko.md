@@ -583,6 +583,7 @@ python crawling_ieee_2023_2025.py --headless --resume --with-keywords --years 20
 
 | 옵션 | 동작 | 적합한 상황 |
 |------|------|------------|
+| `--journal-option all` | **Publication Title 필터 미적용** → 연도 필터만 걸고 전체 다운로드 | IEEE 전체를 연도별로 수집 |
 | `--journal-option 1` | Publication Title 검색창에 **"Remote Sensing"** 입력 → 나오는 항목 **전체 체크** → 일괄 크롤 | Remote Sensing 관련 저널 전부 수집 |
 | `--journal-option 2` | **4개 고정 저널** 선택 (IEEE Access / Sensors Journal / IGARSS `{year}` / TGRS) → 일괄 크롤 | 핵심 저널만 빠르게 수집 |
 | `--journal-option 3` | 검색 없이 기본 목록 **상위 5개** 체크 → 일괄 크롤 | IEEE가 보여주는 상위 게재 저널 |
@@ -590,6 +591,20 @@ python crawling_ieee_2023_2025.py --headless --resume --with-keywords --years 20
 
 > `--journal-option 2`의 IGARSS는 크롤링 연도에 맞게 자동 치환됩니다.  
 > 예: `--years 2024` → `"IGARSS 2024"` 검색
+
+#### `--years all` 옵션
+
+`--years all`을 지정하면 **연도 필터를 적용하지 않고** IEEE Xplore 전체를 대상으로 크롤링합니다.
+
+```bash
+# 연도 필터 없이 IEEE 전체 (필터도 없음)
+python crawling_ieee_2023_2025.py --headless --journal-option all --years all
+
+# 연도 필터 없이 저널 기반 크롤
+python crawling_ieee_2023_2025.py --headless --num-journals 10 --years all
+```
+
+> **주의**: `--years all`은 방대한 양의 논문을 대상으로 하므로 실행 전 저장 공간을 확인하세요.
 
 #### 기존 방식과의 차이
 
@@ -603,6 +618,12 @@ python crawling_ieee_2023_2025.py --headless --resume --with-keywords --years 20
 #### 사용법
 
 ```bash
+# option all: 필터 없이 전체 (연도 필터만 적용)
+python crawling_ieee_2023_2025.py --headless --journal-option all --years 2024 2025
+
+# option all + 전체 연도: 연도·저널 모두 필터 없이 IEEE 전체 다운로드
+python crawling_ieee_2023_2025.py --headless --journal-option all --years all
+
 # option1: "Remote Sensing" 검색 → 모든 관련 저널 일괄 크롤
 python crawling_ieee_2023_2025.py --headless --journal-option 1 --years 2024 2025
 
@@ -891,6 +912,16 @@ python tiktoken/scripts/json_token_counter.py "파일.json"
 ---
 
 ## 변경 이력
+
+### `--journal-option all` 및 `--years all` 추가 (5차 개선 보완)
+
+- **`--journal-option all` 추가**: Publication Title 필터를 전혀 적용하지 않고 연도 필터만으로 IEEE 전체 크롤. `_crawl_with_journal_option`, `_relogin_and_setup`, `_do_year_crawl` 에 `option == 'all'` 분기 추가
+- **`--years all` 추가**: `--years` 인수 타입을 `str` 로 변경하여 숫자 목록 또는 `all` 허용. `setup_ieee_advanced_search` 에 `year == 'all'` 분기 추가 — 연도 필터 없이 검색 버튼만 클릭
+- **폴백 URL 수정**: 연도 파라미터 없는 `searchresult.jsp` URL 사용 (`--years all` 시 `ranges=` 파라미터 제거)
+- **CLI 변경**: `--journal-option` choices에 `'all'` 추가 (`{1,2,3,4,all}`), `--year`/`--years` `type=str` 변경
+- **시작 요약 출력**: `years == ['all']` 이면 `전체 연도 (필터 없음)` 표시
+
+---
 
 ### `--journal-option` Publication Title 다중 선택 일괄 크롤 추가 (5차 개선)
 

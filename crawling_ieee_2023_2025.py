@@ -796,8 +796,13 @@ def access_ieee_via_library(driver):
 
 # ==================== 3단계: Advanced Search ====================
 def setup_ieee_advanced_search(driver, year):
+    """IEEE Xplore Advanced Search 설정.
+
+    year='all' 이면 연도 필터를 적용하지 않고 전체 연도 검색.
+    """
+    year_str = str(year)
     print('='*60)
-    print(f'3단계: {year}년 논문 Advanced Search 설정')
+    print(f'3단계: {"전체 연도" if year_str == "all" else year_str + "년"} Advanced Search 설정')
     print('='*60)
 
     try:
@@ -814,6 +819,26 @@ def setup_ieee_advanced_search(driver, year):
         time.sleep(5)
         driver.refresh()
         time.sleep(5)
+
+        # ── year='all': 연도 필터 없이 검색 버튼만 클릭 ─────────────────
+        if year_str == 'all':
+            try:
+                search_button = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located(
+                        (By.CSS_SELECTOR, "button.stats-Adv_search, button.xpl-btn-primary")
+                    )
+                )
+                driver.execute_script('arguments[0].click();', search_button)
+                print('[OK] 연도 필터 없이 검색 실행 (전체 연도)')
+                time.sleep(10)
+            except Exception:
+                # 폴백: 연도 파라미터 없는 검색결과 URL 직접 이동
+                fallback_url = f'{base_url}/search/searchresult.jsp?action=search&newsearch=true'
+                print(f'[폴백] 전체연도 URL 직접 이동: {fallback_url}')
+                driver.get(fallback_url)
+                time.sleep(10)
+            print(f'현재 URL: {driver.current_url}\n')
+            return True
 
         # Year Range 라디오 버튼 클릭 (날짜범위 대신 연도범위 선택)
         try:
@@ -872,8 +897,9 @@ def setup_ieee_advanced_search(driver, year):
             base = cur.split('/search')[0] if '/search' in cur else \
                    cur.split('/Xplore')[0] if '/Xplore' in cur else \
                    'https://ieeexplore-ieee-org-ssl.proxy.kookmin.ac.kr'
+            ranges_param = (f'&ranges={year}_{year}_Year' if str(year) != 'all' else '')
             fallback_url = (f'{base}/search/searchresult.jsp'
-                            f'?action=search&newsearch=true&ranges={year}_{year}_Year')
+                            f'?action=search&newsearch=true{ranges_param}')
             print(f'[폴백] URL 직접 이동: {fallback_url}')
             driver.get(fallback_url)
             time.sleep(10)
@@ -1672,7 +1698,9 @@ def _relogin_and_setup(driver, year, config, username, password,
         return False
     # 필터 재적용 (journal_option 여부에 따라 분기)
     if journal_option is not None:
-        if not apply_publication_filter_multi(driver, journal_option, year):
+        if journal_option == 'all':
+            print('[재로그인] journal-option all → 필터 없이 전체 크롤')
+        elif not apply_publication_filter_multi(driver, journal_option, year):
             print('[재로그인] 저널 필터(다중) 건너뜀')
     else:
         cur_search = search_term or 'Transactions on Geoscience and Remote Sensing'
@@ -1828,17 +1856,20 @@ def _crawl_with_journal_option(driver, year, config, username, password,
     apply_publication_filter_multi 로 여러 저널/학회를 한 번에 필터링하고
     결과 전체를 단일 크롤 단위로 처리한다.
 
-    option 1 : "Remote Sensing" 검색 → 전체 항목 선택
-    option 2 : 4개 고정 저널 (IEEE Access / Sensors Journal / IGARSS / TGRS)
-    option 3 : 검색 없이 상위 5개
-    option 4 : 검색 없이 상위 10개
+    option 'all': 필터 없이 전체 (연도 필터만 적용)
+    option 1    : "Remote Sensing" 검색 → 전체 항목 선택
+    option 2    : 4개 고정 저널 (IEEE Access / Sensors Journal / IGARSS / TGRS)
+    option 3    : 검색 없이 상위 5개
+    option 4    : 검색 없이 상위 10개
     """
-    opt_labels = {1: 'Remote Sensing 전체', 2: '4개 고정 저널',
-                  3: '상위 5개', 4: '상위 10개'}
+    opt_labels = {'all': '필터 없음 전체', 1: 'Remote Sensing 전체',
+                  2: '4개 고정 저널', 3: '상위 5개', 4: '상위 10개'}
     label = f'[OPT{option}] {opt_labels.get(option, "?")}'
+    year_str = str(year)
 
     print(f"\n{'='*60}")
-    print(f'저널옵션{option} 크롤링 시작: {label}  ({year}년, p.{start_page}~)')
+    print(f'저널옵션{option} 크롤링 시작: {label}  '
+          f'({"전체 연도" if year_str == "all" else year_str + "년"}, p.{start_page}~)')
     print(f"{'='*60}\n")
 
     # ── 검색 + 필터 설정 ─────────────────────────────────────────────────
@@ -1852,7 +1883,9 @@ def _crawl_with_journal_option(driver, year, config, username, password,
             print('[경고] 재로그인 실패 → 건너뜀')
             return
     else:
-        if not apply_publication_filter_multi(driver, option, year):
+        if option == 'all':
+            print('[INFO] journal-option all → Publication Title 필터 없이 전체 크롤')
+        elif not apply_publication_filter_multi(driver, option, year):
             print('[경고] Publication Title 필터(다중) 실패 → 건너뜀')
             return
         if not set_items_per_page(driver, 10):
@@ -2094,8 +2127,8 @@ def _do_year_crawl(driver, year, config, username, password,
     try:
         # ── --journal-option 모드: 다중 필터를 한 번에 적용해 단일 크롤 ─────
         if journal_option is not None:
-            opt_labels = {1: 'Remote Sensing 전체', 2: '4개 고정 저널',
-                          3: '상위 5개', 4: '상위 10개'}
+            opt_labels = {'all': '필터 없음 전체', 1: 'Remote Sensing 전체',
+                          2: '4개 고정 저널', 3: '상위 5개', 4: '상위 10개'}
             label = f'[OPT{journal_option}] {opt_labels.get(journal_option, "?")}'
             start_page = progress.get_start_page(label, resume)
 
@@ -2295,6 +2328,10 @@ def parse_args():
   python crawling_ieee_2023_2025.py --headless --keywords-only --years 2024 2025
 
   # 저널 선택 옵션 사용 (--journal-option)
+  # option all: 필터 없이 전체 다운로드 (Publication Title 필터 미적용)
+  python crawling_ieee_2023_2025.py --headless --journal-option all --years 2024 2025
+  # option all + 전체 연도: 연도·저널 필터 없이 IEEE 전체 다운로드
+  python crawling_ieee_2023_2025.py --headless --journal-option all --years all
   # option1: "Remote Sensing" 검색 → 나오는 저널 모두 체크 후 일괄 크롤
   python crawling_ieee_2023_2025.py --headless --journal-option 1 --years 2024 2025
   # option2: IEEE Access / Sensors Journal / IGARSS / TGRS 4개 고정 일괄 크롤
@@ -2303,6 +2340,8 @@ def parse_args():
   python crawling_ieee_2023_2025.py --headless --journal-option 3 --years 2023 2024 2025
   # option4: 검색 없이 Publication Title 상위 10개 일괄 크롤
   python crawling_ieee_2023_2025.py --headless --journal-option 4 --years 2023 2024 2025
+  # 전체 연도 단독 사용 (연도 필터 없이 저널 기반 크롤)
+  python crawling_ieee_2023_2025.py --headless --num-journals 10 --years all
 
   # 진행 상황만 출력
   python crawling_ieee_2023_2025.py --status --years 2023 2024 2025
@@ -2338,20 +2377,22 @@ def parse_args():
         help='키워드 기반 크롤링만 실행 (저널 크롤링 건너뜀)'
     )
     parser.add_argument(
-        '--journal-option', type=int, default=None,
-        choices=[1, 2, 3, 4],
-        metavar='{1,2,3,4}',
+        '--journal-option', type=str, default=None,
+        choices=['1', '2', '3', '4', 'all'],
+        metavar='{1,2,3,4,all}',
         help=(
             '저널/학회 선택 방식 지정 (기본값: 없음 → --num-journals 로 순위 기반 순회).\n'
-            '  1 = Publication Title 검색창에 "Remote Sensing" 입력 → 나오는 항목 전체 체크 후 일괄 크롤\n'
-            '  2 = 4개 고정 저널 일괄 체크 (IEEE Access / Sensors Journal / IGARSS / TGRS)\n'
-            '  3 = 검색 없이 Publication Title 상위 5개 체크 후 일괄 크롤\n'
-            '  4 = 검색 없이 Publication Title 상위 10개 체크 후 일괄 크롤'
+            '  all = Publication Title 필터 없이 전체 다운로드\n'
+            '  1   = Publication Title 검색창에 "Remote Sensing" 입력 → 나오는 항목 전체 체크 후 일괄 크롤\n'
+            '  2   = 4개 고정 저널 일괄 체크 (IEEE Access / Sensors Journal / IGARSS / TGRS)\n'
+            '  3   = 검색 없이 Publication Title 상위 5개 체크 후 일괄 크롤\n'
+            '  4   = 검색 없이 Publication Title 상위 10개 체크 후 일괄 크롤'
         )
     )
-    parser.add_argument('--year',  type=int, default=None, help='크롤링 단일 연도 (예: 2024)')
-    parser.add_argument('--years', type=int, nargs='+', default=None,
-                        help='크롤링 연도 목록 (예: --years 2023 2024 2025)')
+    parser.add_argument('--year',  type=str, default=None,
+                        help='크롤링 단일 연도 (예: 2024)')
+    parser.add_argument('--years', type=str, nargs='+', default=None,
+                        help='크롤링 연도 목록 (예: --years 2023 2024 2025, 또는 --years all)')
     parser.add_argument('--save-path', default=None,
                         help=f'저장 기본 경로 (기본값: {default_save})')
     parser.add_argument('--username', default=None, help='도서관 로그인 ID')
@@ -2363,17 +2404,27 @@ def parse_args():
 def main():
     args = parse_args()
 
-    # 연도 결정
+    # 연도 결정 ('all' 포함 처리)
     if args.year and args.years:
         print('[오류] --year 와 --years 를 동시에 사용할 수 없습니다.')
         sys.exit(1)
     elif args.year:
-        years = [args.year]
+        raw_years = [args.year]
     elif args.years:
-        years = args.years
+        raw_years = args.years
     else:
-        years = [2023, 2024, 2025]
-        print(f'[INFO] 연도 미지정 → 기본값: {years}')
+        raw_years = ['2023', '2024', '2025']
+        print(f'[INFO] 연도 미지정 → 기본값: {raw_years}')
+
+    # 'all' 이면 ['all'] 유지, 아니면 int 변환
+    if len(raw_years) == 1 and raw_years[0].lower() == 'all':
+        years = ['all']
+    else:
+        try:
+            years = [int(y) for y in raw_years]
+        except ValueError:
+            print(f'[오류] --years 에 유효하지 않은 값 포함: {raw_years}  (숫자 또는 all 만 허용)')
+            sys.exit(1)
 
     # 저장 경로
     if args.save_path:
@@ -2387,7 +2438,14 @@ def main():
     num_journals   = args.num_journals
     with_keywords  = args.with_keywords
     keywords_only  = args.keywords_only
-    journal_option = args.journal_option
+    # journal_option: 'all' 그대로 유지, 숫자 문자열은 int 변환
+    _jopt_raw = args.journal_option
+    if _jopt_raw is None:
+        journal_option = None
+    elif _jopt_raw == 'all':
+        journal_option = 'all'
+    else:
+        journal_option = int(_jopt_raw)
 
     if keywords_only and with_keywords:
         print('[오류] --with-keywords 와 --keywords-only 를 동시에 사용할 수 없습니다.')
@@ -2440,8 +2498,9 @@ def main():
     print('\n' + '='*60)
     print('IEEE 논문 대용량 크롤러 시작')
     print('='*60)
+    years_display = '전체 연도 (필터 없음)' if years == ['all'] else str(years)
     print(f'  브라우저    : {"headless" if args.headless else "GUI (브라우저 화면 표시)"}')
-    print(f'  대상 연도   : {years}')
+    print(f'  대상 연도   : {years_display}')
     print(f'  크롤링 모드 : {crawl_mode}')
     if journal_option is None and not keywords_only:
         print(f'  저널 수     : {effective_num_journals}개 (초분광 관련도 순위 상위)')
