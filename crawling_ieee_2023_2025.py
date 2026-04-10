@@ -384,6 +384,20 @@ JOURNAL_TARGETS_ALL = [
 # 하위 호환성을 위한 기본 저널 리스트 (상위 30개, --num-journals 기본값)
 JOURNAL_TARGETS = JOURNAL_TARGETS_ALL[:30]
 
+# ==================== 저널 선택 옵션 (--journal-option) ====================
+# --journal-option 1 : Publication Title 검색창에 "Remote Sensing" 입력 → 나오는 항목 전체 체크
+# --journal-option 2 : 아래 JOURNAL_OPTION2_FIXED 4개 저널을 일괄 체크
+# --journal-option 3 : 검색 없이 Publication Title 상위 5개 체크
+# --journal-option 4 : 검색 없이 Publication Title 상위 10개 체크
+#
+# {year} 는 크롤링 연도로 자동 치환됨 (예: "IGARSS {year}" → "IGARSS 2024")
+JOURNAL_OPTION2_FIXED = [
+    ("IEEE Access",                                         "IEEE Access"),
+    ("IEEE Sensors Journal",                                "IEEE Sensors Journal"),
+    ("IGARSS {year}",                                       "IGARSS {year}"),
+    ("Transactions on Geoscience and Remote Sensing",       "IEEE Transactions on Geoscience and Remote Sensing"),
+]
+
 # ==================== 키워드 기반 검색 목록 (--with-keywords / --keywords-only 옵션용) ====================
 # IEEE Xplore 전체에서 키워드로 검색 → 저널 필터 없이 관련 논문 대량 수집
 # 초분광·원격탐사 관련 50개 키워드 (저널 목록에 없는 저널의 논문도 포함)
@@ -934,6 +948,125 @@ def apply_publication_filter(driver, search_term, label_match=None):
 
     except Exception as e:
         print(f'[경고] 저널 필터 적용 실패 (계속 진행): {e}')
+        return False
+
+
+# ==================== 4단계: Publication 필터 (다중 선택, --journal-option 전용) ====================
+def apply_publication_filter_multi(driver, option, year):
+    """Publication Title 필터 다중 선택 후 Apply.  --journal-option 1~4 전용.
+
+    option 1 : 검색창에 "Remote Sensing" 입력 → 나타나는 항목 모두 체크 → Apply
+    option 2 : JOURNAL_OPTION2_FIXED 의 4개 저널을 순차 검색·체크 → Apply
+    option 3 : 검색 없이 기본 목록 상위 5개 체크 → Apply
+    option 4 : 검색 없이 기본 목록 상위 10개 체크 → Apply
+    """
+    SECTION_XPATH  = "//button[normalize-space(.)='Publication Title']"
+    SIBLING_XPATH  = SECTION_XPATH + "/../../following-sibling::*"
+    INPUT_XPATH    = SIBLING_XPATH + "//input[@placeholder='Enter Title' or @placeholder='Enter title']"
+    LABEL_XPATH    = SIBLING_XPATH + "//label"
+
+    opt_names = {1: 'Remote Sensing 전체', 2: '4개 고정 저널', 3: '상위 5개', 4: '상위 10개'}
+    print(f'4단계(다중): Publication Title 필터 적용 — 옵션{option}: {opt_names.get(option, "?")}')
+
+    try:
+        # Publication Title 섹션 펼치기
+        pub_btn = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, SECTION_XPATH))
+        )
+        if pub_btn.get_attribute('aria-expanded') != 'true':
+            driver.execute_script('arguments[0].click();', pub_btn)
+            time.sleep(2)
+            print('[OK] Publication Title 섹션 펼침')
+
+        inp = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, INPUT_XPATH))
+        )
+
+        # ── option 1: "Remote Sensing" 검색 → 전체 선택 ────────────────────
+        if option == 1:
+            inp.clear()
+            inp.send_keys('Remote Sensing')
+            time.sleep(4)
+            labels = driver.find_elements(By.XPATH, LABEL_XPATH)
+            if not labels:
+                print('[경고] "Remote Sensing" 검색 결과 없음')
+                return False
+            count = 0
+            for lbl in labels:
+                try:
+                    driver.execute_script('arguments[0].click();', lbl)
+                    count += 1
+                    time.sleep(0.3)
+                except Exception:
+                    pass
+            print(f'[OK] {count}개 항목 선택 완료 (Remote Sensing 검색)')
+
+        # ── option 2: 4개 고정 저널 순차 검색·선택 ─────────────────────────
+        elif option == 2:
+            selected = 0
+            for search_raw, label_raw in JOURNAL_OPTION2_FIXED:
+                search_term = search_raw.replace('{year}', str(year))
+                match_text  = label_raw.replace('{year}', str(year))
+                match_sub   = match_text[:40]
+
+                inp.clear()
+                inp.send_keys(search_term)
+                time.sleep(3)
+
+                labels = driver.find_elements(
+                    By.XPATH, f"//label[contains(normalize-space(), '{match_sub}')]"
+                )
+                if labels:
+                    driver.execute_script('arguments[0].click();', labels[0])
+                    selected += 1
+                    print(f'  [OK] 선택: {labels[0].text.strip()[:60]}')
+                    time.sleep(0.5)
+                else:
+                    print(f'  [경고] 항목 없음: {match_text[:60]}')
+
+                inp.clear()
+                time.sleep(0.5)
+
+            if selected == 0:
+                print('[경고] option2: 선택된 저널 없음')
+                return False
+            print(f'[OK] option2: {selected}/4 저널 선택 완료')
+
+        # ── option 3/4: 검색 없이 상위 N개 선택 ────────────────────────────
+        elif option in (3, 4):
+            top_n = 5 if option == 3 else 10
+            time.sleep(2)
+            labels = driver.find_elements(By.XPATH, LABEL_XPATH)[:top_n]
+            if not labels:
+                print(f'[경고] option{option}: 기본 목록 항목 없음')
+                return False
+            for lbl in labels:
+                try:
+                    driver.execute_script('arguments[0].click();', lbl)
+                    time.sleep(0.3)
+                except Exception:
+                    pass
+            print(f'[OK] option{option}: 상위 {len(labels)}개 선택 완료')
+
+        else:
+            print(f'[오류] 알 수 없는 journal_option: {option}')
+            return False
+
+        # ── Apply 버튼 클릭 ──────────────────────────────────────────────
+        apply_btn = WebDriverWait(driver, 10).until(
+            lambda d: next(
+                (b for b in d.find_elements(By.CSS_SELECTOR, 'button.stats-applyRefinements-button')
+                 if b.is_displayed() and b.is_enabled()),
+                None
+            )
+        )
+        driver.execute_script('arguments[0].click();', apply_btn)
+        print('[OK] Apply 클릭 → 필터 적용 완료')
+        time.sleep(8)
+        return True
+
+    except Exception as e:
+        print(f'[경고] Publication Title 필터(옵션{option}) 실패: {e}')
         return False
 
 
@@ -1519,8 +1652,12 @@ def _navigate_with_warmup(driver, base_search_url: str, target_page: int):
 
 # ==================== 단일 연도 크롤링 ====================
 def _relogin_and_setup(driver, year, config, username, password,
-                       search_term=None, label_match=None, stats=None):
-    """세션 만료 시 재로그인 후 검색 설정 복구. 성공하면 True."""
+                       search_term=None, label_match=None, stats=None,
+                       journal_option=None):
+    """세션 만료 시 재로그인 후 검색 설정 복구. 성공하면 True.
+
+    journal_option : --journal-option 값(1~4). None이면 단일 저널 필터(기존 동작).
+    """
     print('[재로그인] 프록시 세션 만료 → 재로그인 시도')
     if stats is not None:
         stats.session_relogins += 1
@@ -1533,11 +1670,15 @@ def _relogin_and_setup(driver, year, config, username, password,
     if not setup_ieee_advanced_search(driver, year):
         print('[재로그인] Advanced Search 실패')
         return False
-    # 현재 저널 필터 재적용
-    cur_search = search_term or 'Transactions on Geoscience and Remote Sensing'
-    cur_label  = label_match or 'IEEE Transactions on Geoscience and Remote Sensing'
-    if not apply_publication_filter(driver, cur_search, cur_label):
-        print('[재로그인] 저널 필터 건너뜀')
+    # 필터 재적용 (journal_option 여부에 따라 분기)
+    if journal_option is not None:
+        if not apply_publication_filter_multi(driver, journal_option, year):
+            print('[재로그인] 저널 필터(다중) 건너뜀')
+    else:
+        cur_search = search_term or 'Transactions on Geoscience and Remote Sensing'
+        cur_label  = label_match or 'IEEE Transactions on Geoscience and Remote Sensing'
+        if not apply_publication_filter(driver, cur_search, cur_label):
+            print('[재로그인] 저널 필터 건너뜀')
     if not set_items_per_page(driver, 10):
         print('[재로그인] Items per page 건너뜀')
     config.base_search_url = driver.current_url
@@ -1680,6 +1821,126 @@ def _crawl_one_journal(driver, year, config, username, password,
     print(f"{'='*60}\n")
 
 
+def _crawl_with_journal_option(driver, year, config, username, password,
+                                option, stats, progress=None, start_page=1):
+    """--journal-option 기반 크롤링: Publication Title 필터를 다중 선택 후 전 페이지 다운로드.
+
+    apply_publication_filter_multi 로 여러 저널/학회를 한 번에 필터링하고
+    결과 전체를 단일 크롤 단위로 처리한다.
+
+    option 1 : "Remote Sensing" 검색 → 전체 항목 선택
+    option 2 : 4개 고정 저널 (IEEE Access / Sensors Journal / IGARSS / TGRS)
+    option 3 : 검색 없이 상위 5개
+    option 4 : 검색 없이 상위 10개
+    """
+    opt_labels = {1: 'Remote Sensing 전체', 2: '4개 고정 저널',
+                  3: '상위 5개', 4: '상위 10개'}
+    label = f'[OPT{option}] {opt_labels.get(option, "?")}'
+
+    print(f"\n{'='*60}")
+    print(f'저널옵션{option} 크롤링 시작: {label}  ({year}년, p.{start_page}~)')
+    print(f"{'='*60}\n")
+
+    # ── 검색 + 필터 설정 ─────────────────────────────────────────────────
+    if not setup_ieee_advanced_search(driver, year):
+        print('[경고] Advanced Search 실패 → 건너뜀')
+        return
+
+    if is_session_expired(driver):
+        if not _relogin_and_setup(driver, year, config, username, password,
+                                  stats=stats, journal_option=option):
+            print('[경고] 재로그인 실패 → 건너뜀')
+            return
+    else:
+        if not apply_publication_filter_multi(driver, option, year):
+            print('[경고] Publication Title 필터(다중) 실패 → 건너뜀')
+            return
+        if not set_items_per_page(driver, 10):
+            print('[경고] Items per page 설정 건너뜀')
+        config.base_search_url = driver.current_url
+        print(f'[INFO] 기준 검색 URL: {config.base_search_url}')
+
+    # ── start_page > 1 이면 warm-up 이동 ────────────────────────────────
+    if start_page > 1 and hasattr(config, 'base_search_url') and config.base_search_url:
+        print(f'[RESUME] p.{start_page} 로 warm-up 이동')
+        _navigate_with_warmup(driver, config.base_search_url, start_page)
+
+    current_page      = start_page
+    visited_pages     = 0
+    page_fail_count   = {}
+    consecutive_fails = 0
+    last_completed    = start_page - 1
+
+    while visited_pages < config.MAX_PAGE_VISITS:
+        if is_session_expired(driver):
+            if not _relogin_and_setup(driver, year, config, username, password,
+                                      stats=stats, journal_option=option):
+                print('[경고] 재로그인 실패 → 크롤링 중단')
+                break
+            if hasattr(config, 'base_search_url') and config.base_search_url:
+                _navigate_with_warmup(driver, config.base_search_url, current_page)
+
+        if not has_search_results(driver):
+            print(f'[완료] {label}: p.{current_page} 빈 페이지 → 종료')
+            if progress:
+                progress.mark_completed(label, last_completed, stats.pdfs_extracted)
+            break
+
+        success = process_current_page(driver, current_page, config, stats=stats)
+
+        if not success:
+            fails = page_fail_count.get(current_page, 0) + 1
+            page_fail_count[current_page] = fails
+            if fails >= config.MAX_PAGE_RETRIES:
+                consecutive_fails += 1
+                print(f'[경고] p.{current_page} {fails}회 실패 → 건너뜀 '
+                      f'(연속 {consecutive_fails}페이지)')
+                if consecutive_fails >= config.MAX_CONSECUTIVE_PAGE_FAILS:
+                    print(f'[중단] {consecutive_fails}페이지 연속 실패 → 크롤링 중단')
+                    if progress:
+                        progress.update(label, f'OPT{option}', last_completed,
+                                        stats.pdfs_extracted, status='in_progress')
+                    break
+                stats.pages_skipped += 1
+                visited_pages += 1
+                next_page = go_to_next_page(driver, current_page, config)
+                if next_page is None:
+                    if progress:
+                        progress.mark_completed(label, last_completed, stats.pdfs_extracted)
+                    break
+                current_page = next_page
+            else:
+                print(f'[경고] p.{current_page} 실패 ({fails}/{config.MAX_PAGE_RETRIES}), 2분 대기')
+                time.sleep(120)
+            continue
+
+        consecutive_fails = 0
+        page_fail_count[current_page] = 0
+        last_completed = current_page
+        visited_pages += 1
+
+        if progress:
+            progress.update(label, f'OPT{option}', current_page,
+                            stats.pdfs_extracted, status='in_progress')
+        stats.checkpoint()
+
+        next_page = go_to_next_page(driver, current_page, config)
+        if next_page is None:
+            print(f'[완료] {label} 전체 페이지 처리 완료!')
+            if progress:
+                progress.mark_completed(label, last_completed, stats.pdfs_extracted)
+            break
+        current_page = next_page
+
+    end_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    print(f"\n{'='*60}")
+    print(f'[완료] {label} ({year}년)  종료: {end_ts}')
+    print(f"  페이지: {stats.pages_processed}개 완료, {stats.pages_skipped}개 건너뜀")
+    print(f"  PDF: {stats.pdfs_extracted}개 추출, {stats.duplicates_skipped}개 중복")
+    print(f"  Zip: {stats.zip_downloads}개  전체선택실패: {stats.select_all_failures}회")
+    print(f"{'='*60}\n")
+
+
 def _crawl_by_keyword(driver, year, config, username, password,
                       keyword, stats,
                       progress=None, start_page: int = 1):
@@ -1802,23 +2063,18 @@ def _crawl_by_keyword(driver, year, config, username, password,
 
 def _do_year_crawl(driver, year, config, username, password,
                    journal_targets=None, num_journals=None,
-                   keyword_targets=None, resume: bool = False):
+                   keyword_targets=None, resume: bool = False,
+                   journal_option=None):
     """단일 연도의 크롤링 내부 루프 — 모든 대상 저널 + (옵션) 키워드를 순회.
 
     Args:
         num_journals  : 사용할 저널 수 (JOURNAL_TARGETS_ALL[:n] 기준). None이면 30개.
         keyword_targets: 키워드 기반 크롤링 목록 (None이면 키워드 크롤링 건너뜀).
         resume        : True이면 progress_{year}.json 을 읽어 완료/진행 중 항목을 재개.
+        journal_option: 1~4 이면 --journal-option 모드 (단일 다중필터 크롤). None이면 기존 저널별 순회.
     """
-    # 저널 타겟 결정
-    if journal_targets is None:
-        n = num_journals if num_journals is not None else 30
-        journal_targets = JOURNAL_TARGETS_ALL[:n]
-
     # 진행 상황 추적기 생성 (resume 여부와 무관하게 항상 기록)
     progress = ProgressTracker(config.BASE_PATH, year)
-    if resume:
-        progress.show_summary(journal_targets)
 
     # CDP로 해당 연도 다운로드 경로 변경
     try:
@@ -1836,43 +2092,83 @@ def _do_year_crawl(driver, year, config, username, password,
         print(f'[CDP] 다운로드 경로(Page): {config.SAVE_PATH}')
 
     try:
-        for idx, (search_term, label_match) in enumerate(journal_targets, 1):
-            # resume 모드: 시작 페이지 결정
-            start_page = progress.get_start_page(label_match, resume)
+        # ── --journal-option 모드: 다중 필터를 한 번에 적용해 단일 크롤 ─────
+        if journal_option is not None:
+            opt_labels = {1: 'Remote Sensing 전체', 2: '4개 고정 저널',
+                          3: '상위 5개', 4: '상위 10개'}
+            label = f'[OPT{journal_option}] {opt_labels.get(journal_option, "?")}'
+            start_page = progress.get_start_page(label, resume)
 
             print(f"\n{'#'*60}")
-            print(f'# [{idx}/{len(journal_targets)}] {label_match}  (p.{start_page}~)')
+            print(f'# [journal-option {journal_option}] {label}  (p.{start_page}~)')
             print(f"{'#'*60}")
 
-            stats = CrawlStats(year=year, journal=label_match)
+            stats = CrawlStats(year=year, journal=label)
             try:
-                _crawl_one_journal(driver, year, config, username, password,
-                                   search_term, label_match, stats,
-                                   progress=progress, start_page=start_page)
+                _crawl_with_journal_option(driver, year, config, username, password,
+                                           journal_option, stats,
+                                           progress=progress, start_page=start_page)
             except KeyboardInterrupt:
                 stats.finalize()
                 write_stats_row(stats)
                 raise
             except Exception as e:
                 ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                print(f'[ERROR] {label_match} 크롤링 실패 [{ts}]: {e}')
+                print(f'[ERROR] journal-option{journal_option} 크롤링 실패 [{ts}]: {e}')
                 traceback.print_exc()
             finally:
                 stats.finalize()
                 write_stats_row(stats)
 
-            # 저널 간 짧은 대기
-            if idx < len(journal_targets):
-                print('[대기] 다음 저널 전 15초 대기...')
-                time.sleep(15)
+            # journal_option 모드에서는 키워드 크롤링도 이어서 실행 가능
+            # (keyword_targets 가 주어진 경우 아래 키워드 루프로 낙하)
 
-        end_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        print(f"\n{'='*60}")
-        print(f'{year}년 저널 크롤링 완료!  저장 경로: {config.SAVE_PATH}')
-        print(f'종료 시각: {end_ts}')
-        print(f"{'='*60}\n")
+        else:
+            # ── 기존 저널별 순회 모드 ──────────────────────────────────────
+            if journal_targets is None:
+                n = num_journals if num_journals is not None else 30
+                journal_targets = JOURNAL_TARGETS_ALL[:n]
 
-        # ── 키워드 기반 추가 크롤링 ─────────────────────────────────────────
+            if resume:
+                progress.show_summary(journal_targets)
+
+            for idx, (search_term, label_match) in enumerate(journal_targets, 1):
+                # resume 모드: 시작 페이지 결정
+                start_page = progress.get_start_page(label_match, resume)
+
+                print(f"\n{'#'*60}")
+                print(f'# [{idx}/{len(journal_targets)}] {label_match}  (p.{start_page}~)')
+                print(f"{'#'*60}")
+
+                stats = CrawlStats(year=year, journal=label_match)
+                try:
+                    _crawl_one_journal(driver, year, config, username, password,
+                                       search_term, label_match, stats,
+                                       progress=progress, start_page=start_page)
+                except KeyboardInterrupt:
+                    stats.finalize()
+                    write_stats_row(stats)
+                    raise
+                except Exception as e:
+                    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    print(f'[ERROR] {label_match} 크롤링 실패 [{ts}]: {e}')
+                    traceback.print_exc()
+                finally:
+                    stats.finalize()
+                    write_stats_row(stats)
+
+                # 저널 간 짧은 대기
+                if idx < len(journal_targets):
+                    print('[대기] 다음 저널 전 15초 대기...')
+                    time.sleep(15)
+
+            end_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            print(f"\n{'='*60}")
+            print(f'{year}년 저널 크롤링 완료!  저장 경로: {config.SAVE_PATH}')
+            print(f'종료 시각: {end_ts}')
+            print(f"{'='*60}\n")
+
+        # ── 키워드 기반 추가 크롤링 (journal_option 모드에서도 실행 가능) ───
         if keyword_targets:
             print(f"\n{'#'*60}")
             print(f'# {year}년 키워드 기반 크롤링 시작 ({len(keyword_targets)}개 키워드)')
@@ -1998,6 +2294,16 @@ def parse_args():
   # 키워드 기반 크롤링만 실행 (저널 크롤링 건너뜀)
   python crawling_ieee_2023_2025.py --headless --keywords-only --years 2024 2025
 
+  # 저널 선택 옵션 사용 (--journal-option)
+  # option1: "Remote Sensing" 검색 → 나오는 저널 모두 체크 후 일괄 크롤
+  python crawling_ieee_2023_2025.py --headless --journal-option 1 --years 2024 2025
+  # option2: IEEE Access / Sensors Journal / IGARSS / TGRS 4개 고정 일괄 크롤
+  python crawling_ieee_2023_2025.py --headless --journal-option 2 --years 2024 2025
+  # option3: 검색 없이 Publication Title 상위 5개 일괄 크롤
+  python crawling_ieee_2023_2025.py --headless --journal-option 3 --years 2023 2024 2025
+  # option4: 검색 없이 Publication Title 상위 10개 일괄 크롤
+  python crawling_ieee_2023_2025.py --headless --journal-option 4 --years 2023 2024 2025
+
   # 진행 상황만 출력
   python crawling_ieee_2023_2025.py --status --years 2023 2024 2025
 
@@ -2030,6 +2336,18 @@ def parse_args():
     parser.add_argument(
         '--keywords-only', action='store_true',
         help='키워드 기반 크롤링만 실행 (저널 크롤링 건너뜀)'
+    )
+    parser.add_argument(
+        '--journal-option', type=int, default=None,
+        choices=[1, 2, 3, 4],
+        metavar='{1,2,3,4}',
+        help=(
+            '저널/학회 선택 방식 지정 (기본값: 없음 → --num-journals 로 순위 기반 순회).\n'
+            '  1 = Publication Title 검색창에 "Remote Sensing" 입력 → 나오는 항목 전체 체크 후 일괄 크롤\n'
+            '  2 = 4개 고정 저널 일괄 체크 (IEEE Access / Sensors Journal / IGARSS / TGRS)\n'
+            '  3 = 검색 없이 Publication Title 상위 5개 체크 후 일괄 크롤\n'
+            '  4 = 검색 없이 Publication Title 상위 10개 체크 후 일괄 크롤'
+        )
     )
     parser.add_argument('--year',  type=int, default=None, help='크롤링 단일 연도 (예: 2024)')
     parser.add_argument('--years', type=int, nargs='+', default=None,
@@ -2065,17 +2383,22 @@ def main():
     else:
         save_base_path = DEFAULT_SAVE_PATH_LINUX
 
-    # --num-journals / --keywords-only 처리
+    # --num-journals / --keywords-only / --journal-option 처리
     num_journals   = args.num_journals
     with_keywords  = args.with_keywords
     keywords_only  = args.keywords_only
+    journal_option = args.journal_option
 
     if keywords_only and with_keywords:
         print('[오류] --with-keywords 와 --keywords-only 를 동시에 사용할 수 없습니다.')
         sys.exit(1)
 
-    # 실제 사용할 저널 수 결정
-    effective_num_journals = 0 if keywords_only else num_journals
+    if journal_option is not None and (with_keywords or keywords_only):
+        print('[오류] --journal-option 은 --with-keywords / --keywords-only 와 동시에 사용할 수 없습니다.')
+        sys.exit(1)
+
+    # 실제 사용할 저널 수 결정 (--journal-option 지정 시 저널 목록 사용 안 함)
+    effective_num_journals = 0 if (keywords_only or journal_option is not None) else num_journals
     effective_keywords     = KEYWORD_SEARCH_TERMS if (with_keywords or keywords_only) else None
     effective_targets      = JOURNAL_TARGETS_ALL[:effective_num_journals] if effective_num_journals > 0 else []
 
@@ -2105,15 +2428,22 @@ def main():
 
     # 시작 요약
     resume_flag = getattr(args, 'resume', False)
-    kw_mode = ('키워드만' if keywords_only else
-                '저널+키워드' if with_keywords else '저널만')
+    if journal_option is not None:
+        jopt_names = {1: 'Remote Sensing 전체', 2: '4개 고정 저널', 3: '상위 5개', 4: '상위 10개'}
+        crawl_mode = f'저널옵션{journal_option} ({jopt_names.get(journal_option, "?")})'
+    elif keywords_only:
+        crawl_mode = '키워드만'
+    elif with_keywords:
+        crawl_mode = '저널+키워드'
+    else:
+        crawl_mode = '저널만'
     print('\n' + '='*60)
     print('IEEE 논문 대용량 크롤러 시작')
     print('='*60)
     print(f'  브라우저    : {"headless" if args.headless else "GUI (브라우저 화면 표시)"}')
     print(f'  대상 연도   : {years}')
-    print(f'  크롤링 모드 : {kw_mode}')
-    if not keywords_only:
+    print(f'  크롤링 모드 : {crawl_mode}')
+    if journal_option is None and not keywords_only:
         print(f'  저널 수     : {effective_num_journals}개 (초분광 관련도 순위 상위)')
     if effective_keywords:
         print(f'  키워드 수   : {len(effective_keywords)}개')
@@ -2155,7 +2485,8 @@ def main():
                                journal_targets=effective_targets if effective_targets else None,
                                num_journals=effective_num_journals,
                                keyword_targets=effective_keywords,
-                               resume=resume_flag)
+                               resume=resume_flag,
+                               journal_option=journal_option)
             except KeyboardInterrupt:
                 interrupted = True
             except Exception:

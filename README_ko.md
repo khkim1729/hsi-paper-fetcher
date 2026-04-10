@@ -25,7 +25,9 @@ Hyperspectral Imaging(HSI) 및 Remote Sensing 관련 논문 PDF 대용량 수집
    - 5.1 [연속 페이지 실패 감지 — 무한 루프 완전 차단](#51-연속-페이지-실패-감지--무한-루프-완전-차단)
    - 5.2 [50개 저널 순위 목록 + --num-journals 옵션](#52-50개-저널-순위-목록----num-journals-옵션)
    - 5.3 [키워드 기반 크롤링 + --with-keywords / --keywords-only 옵션](#53-키워드-기반-크롤링----with-keywords----keywords-only-옵션)
-6. [IEEE TGRS 크롤링 전체 흐름](#ieee-tgrs-크롤링-crawling_ieee_2023_2025py)
+6. [IEEE 대용량 크롤링 — 5차 개선](#ieee-대용량-크롤링--5차-개선)
+   - 6.1 [--journal-option: Publication Title 다중 선택 일괄 크롤](#61---journal-option-publication-title-다중-선택-일괄-크롤)
+7. [IEEE TGRS 크롤링 전체 흐름](#ieee-tgrs-크롤링-crawling_ieee_2023_2025py)
 6. [빠른 시작](#빠른-시작)
 7. [전체 옵션](#전체-옵션)
 7. [기본 저장 경로](#기본-저장-경로)
@@ -564,6 +566,63 @@ python crawling_ieee_2023_2025.py --headless --resume --with-keywords --years 20
 
 ---
 
+## IEEE 대용량 크롤링 — 5차 개선
+
+---
+
+### 6.1 `--journal-option`: Publication Title 다중 선택 일괄 크롤
+
+#### 배경
+
+기존 방식(`--num-journals`)은 `JOURNAL_TARGETS_ALL` 리스트에서 저널을 **하나씩 순서대로** 선택·크롤했습니다.  
+실제 IEEE Xplore에 없는 저널이 포함될 수 있고, 리스트 기반이라 실제 IEEE 사이드바 상황과 다를 수 있는 문제가 있었습니다.
+
+**5차 개선**에서는 IEEE Xplore 검색 결과 왼쪽 사이드바의 **Publication Title 필터**를 직접 조작하는 4가지 옵션을 추가했습니다.
+
+#### 옵션별 동작
+
+| 옵션 | 동작 | 적합한 상황 |
+|------|------|------------|
+| `--journal-option 1` | Publication Title 검색창에 **"Remote Sensing"** 입력 → 나오는 항목 **전체 체크** → 일괄 크롤 | Remote Sensing 관련 저널 전부 수집 |
+| `--journal-option 2` | **4개 고정 저널** 선택 (IEEE Access / Sensors Journal / IGARSS `{year}` / TGRS) → 일괄 크롤 | 핵심 저널만 빠르게 수집 |
+| `--journal-option 3` | 검색 없이 기본 목록 **상위 5개** 체크 → 일괄 크롤 | IEEE가 보여주는 상위 게재 저널 |
+| `--journal-option 4` | 검색 없이 기본 목록 **상위 10개** 체크 → 일괄 크롤 | 상위 10개 넓은 커버리지 |
+
+> `--journal-option 2`의 IGARSS는 크롤링 연도에 맞게 자동 치환됩니다.  
+> 예: `--years 2024` → `"IGARSS 2024"` 검색
+
+#### 기존 방식과의 차이
+
+| 항목 | 기존 (`--num-journals`) | 신규 (`--journal-option`) |
+|------|------------------------|--------------------------|
+| 저널 선택 기준 | 코드 내 고정 리스트 순위 | IEEE 사이드바 실시간 상태 |
+| 크롤 단위 | 저널 1개씩 순차 실행 | 선택 전체를 1번에 묶어 실행 |
+| 존재하지 않는 저널 | 필터 실패 → 건너뜀 | 처음부터 선택하지 않음 |
+| 통계 기록 | 저널별 별도 행 | `[OPT{N}]` 태그 1개 행 |
+
+#### 사용법
+
+```bash
+# option1: "Remote Sensing" 검색 → 모든 관련 저널 일괄 크롤
+python crawling_ieee_2023_2025.py --headless --journal-option 1 --years 2024 2025
+
+# option2: 4개 고정 저널 (IEEE Access / Sensors / IGARSS / TGRS)
+python crawling_ieee_2023_2025.py --headless --journal-option 2 --years 2024 2025
+
+# option3: 상위 5개 저널 (검색 없이 기본 목록)
+python crawling_ieee_2023_2025.py --headless --journal-option 3 --years 2023 2024 2025
+
+# option4: 상위 10개 저널 (검색 없이 기본 목록)
+python crawling_ieee_2023_2025.py --headless --journal-option 4 --years 2023 2024 2025
+
+# resume 가능
+python crawling_ieee_2023_2025.py --headless --resume --journal-option 2 --years 2024 2025
+```
+
+> **참고**: `--journal-option` 은 `--num-journals`, `--with-keywords`, `--keywords-only` 와 함께 사용할 수 없습니다.
+
+---
+
 ## IEEE TGRS 크롤링 (`crawling_ieee_2023_2025.py`)
 
 ### 전체 흐름
@@ -832,6 +891,18 @@ python tiktoken/scripts/json_token_counter.py "파일.json"
 ---
 
 ## 변경 이력
+
+### `--journal-option` Publication Title 다중 선택 일괄 크롤 추가 (5차 개선)
+
+- **`JOURNAL_OPTION2_FIXED` 상수 추가**: `--journal-option 2` 용 4개 고정 저널 정의 (IEEE Access, Sensors Journal, IGARSS `{year}`, TGRS). `{year}` 는 크롤링 연도로 자동 치환
+- **`apply_publication_filter_multi()` 함수 추가**: Publication Title 필터 다중 선택 후 Apply 한 번에 처리. option 1~4 분기 처리
+- **`_crawl_with_journal_option()` 함수 추가**: 다중 필터 적용 후 단일 크롤 단위로 전 페이지 다운로드. 재로그인·resume·연속실패감지 모두 지원
+- **`_relogin_and_setup()` 수정**: `journal_option` 파라미터 추가. 재로그인 후 `apply_publication_filter_multi` 또는 기존 `apply_publication_filter` 분기 적용
+- **`_do_year_crawl()` 수정**: `journal_option` 파라미터 추가. 값이 있으면 `_crawl_with_journal_option` 단일 호출, 없으면 기존 저널별 순회
+- **`--journal-option {1,2,3,4}` CLI 인수 추가**: `parse_args()` 및 `main()` 업데이트, 크롤링 모드 요약 출력에 반영
+- **README_ko.md 5차 개선 내용 추가** (6.1 섹션)
+
+---
 
 ### 연속 페이지 실패 감지 + 50개 저널 순위 목록 + 키워드 기반 크롤링 추가
 
