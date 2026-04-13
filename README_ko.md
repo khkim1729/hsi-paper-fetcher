@@ -915,8 +915,8 @@ python tiktoken/scripts/json_token_counter.py "파일.json"
 
 ### KIST 차단 페이지 근본 원인 수정 — Chrome 프로필 초기화 및 재시도 전략 개선
 
-- **근본 원인 파악**: KIST 차단(`웹서비스 차단 안내`)은 버튼 없는 서버 사이드 일시 차단. 이전 실행에서 누적된 Chrome 프로필(`~/.chrome_profile`) 쿠키·히스토리가 재차 차단을 유발
-- **`setup_driver()` 수정**: Chrome 프로필 디렉토리를 매 실행 시 `shutil.rmtree`로 완전 초기화 (`SingletonLock` 제거 로직은 불필요해져 삭제)
+- **근본 원인 파악**: KIST 차단(`웹서비스 차단 안내`)은 버튼 없는 서버 사이드 일시 차단. 이전 실행에서 누적된 Chrome 프로필 쿠키·히스토리가 재차 차단을 유발
+- **`setup_driver()` 수정**: Chrome 프로필을 NAS 경로(`/nas1/.chrome_profile`) 대신 **로컬 경로**(`/data/khkim/chrome_tmp/.chrome_profile`)에 생성. 매 실행 시 `shutil.rmtree`로 완전 초기화. NAS `rmtree` 실패 시 `SingletonLock` 만 제거하는 폴백 유지
 - **`access_ieee_via_library()` 전면 재작성**: KIST 감지 시 KIST 창 닫기 → 라이브러리 창 복귀 → 대기(2분·5분) → IEEE 링크 재클릭 전략 적용. 버튼 클릭 시도 코드 제거. 최종 실패 시 `False` 반환
 - **`login_kookmin_library()` 수정**: 로그인 버튼 클릭 시 Angular Material 오버레이(`cdk-overlay-backdrop`) 닫기 후 JS 폴백 클릭 적용
 - **`_relogin_and_setup()` 수정**: `access_ieee_via_library()` 실패 시 쿠키 삭제 루프 제거 (프로필 초기화로 대체)

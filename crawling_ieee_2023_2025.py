@@ -511,25 +511,32 @@ def setup_chrome_driver(download_dir, headless=False):
     headless=False : 브라우저 창을 직접 보며 진행 상황 확인 가능 (기본)
     headless=True  : 서버 환경 (화면 없이 백그라운드 실행)
     """
+    import shutil
+
     options = Options()
 
-    # Chrome 프로필 디렉토리: 매 실행마다 완전히 초기화하여 이전 세션 쿠키/히스토리 제거
-    # (누적된 KIST 차단 관련 데이터가 재차 차단을 유발하는 문제 방지)
-    chrome_tmp_dir = Path(download_dir).parent / '.chrome_profile'
-    if chrome_tmp_dir.exists():
-        import shutil
-        try:
-            shutil.rmtree(str(chrome_tmp_dir))
-        except Exception:
-            pass
-    chrome_tmp_dir.mkdir(parents=True, exist_ok=True)
-
-    # TMPDIR을 /tmp 대신 로컬 경로로 오버라이드
-    # Chrome은 --disable-extensions 설정과 무관하게 내부적으로 TMPDIR을 사용함
-    # /tmp가 가득 찼거나 권한 문제 시 "cannot create temp dir for unpacking extensions" 에러 발생
+    # Chrome TMPDIR: 로컬 경로 (NAS 대신) — /tmp 가득 찼을 때 "cannot create temp dir" 방지
     chrome_local_tmp = Path('/data/khkim/chrome_tmp')
     chrome_local_tmp.mkdir(parents=True, exist_ok=True)
     os.environ['TMPDIR'] = str(chrome_local_tmp)
+
+    # Chrome 프로필: 로컬 경로에 매 실행마다 새로 생성 (NAS 경로는 rmtree 실패 가능)
+    # 이전 세션 쿠키/히스토리가 누적되면 KIST 차단이 재트리거되므로 항상 초기화
+    chrome_tmp_dir = chrome_local_tmp / '.chrome_profile'
+    if chrome_tmp_dir.exists():
+        try:
+            shutil.rmtree(str(chrome_tmp_dir))
+        except Exception:
+            # 삭제 실패 시 SingletonLock 만 제거하여 Chrome 시작 가능하게 유지
+            for lock in ['SingletonLock', 'SingletonCookie', 'SingletonSocket']:
+                lock_path = chrome_tmp_dir / lock
+                if lock_path.exists():
+                    try:
+                        lock_path.unlink()
+                    except Exception:
+                        pass
+    chrome_tmp_dir.mkdir(parents=True, exist_ok=True)
+
     options.add_argument(f'--user-data-dir={chrome_tmp_dir}')
     options.add_argument('--no-first-run')
     options.add_argument('--no-default-browser-check')
