@@ -913,13 +913,13 @@ python tiktoken/scripts/json_token_counter.py "파일.json"
 
 ## 변경 이력
 
-### KIST 보안경고 페이지 감지 및 우회 처리 추가
+### KIST 차단 페이지 근본 원인 수정 — Chrome 프로필 초기화 및 재시도 전략 개선
 
-- **현상**: `--journal-option all --years all` 실행 시 브라우저가 `https://kist.kookmin.ac.kr/kist_new/security/warning.do` 로 리다이렉트되어 IEEE 접근 실패, 0건 다운로드 후 즉시 종료
-- **`is_session_expired()` 수정**: `kist.kookmin.ac.kr`, `lib.kookmin.ac.kr/login` 패턴 추가 → KIST 보안경고·도서관 재로그인 페이지도 세션 만료로 판정
-- **`access_ieee_via_library()` 수정**: IEEE 접속 후 KIST 경고 페이지 감지 시 확인 버튼 클릭 3회 재시도, 실패하면 `IEEE_PROXY_HOME` 직접 접속으로 우회
-- **`setup_ieee_advanced_search()` 수정**: `_is_ieee_url()` 내부 헬퍼 추가. Advanced Search 진입 전·후 URL이 IEEE Xplore 도메인인지 검증하여 비정상 URL이면 `False` 반환
-- **`_crawl_with_journal_option()` 수정**: `setup_ieee_advanced_search()` 실패 또는 세션 만료 감지 시 `_relogin_and_setup()` 자동 재로그인 트리거
+- **근본 원인 파악**: KIST 차단(`웹서비스 차단 안내`)은 버튼 없는 서버 사이드 일시 차단. 이전 실행에서 누적된 Chrome 프로필(`~/.chrome_profile`) 쿠키·히스토리가 재차 차단을 유발
+- **`setup_driver()` 수정**: Chrome 프로필 디렉토리를 매 실행 시 `shutil.rmtree`로 완전 초기화 (`SingletonLock` 제거 로직은 불필요해져 삭제)
+- **`access_ieee_via_library()` 전면 재작성**: KIST 감지 시 KIST 창 닫기 → 라이브러리 창 복귀 → 대기(2분·5분) → IEEE 링크 재클릭 전략 적용. 버튼 클릭 시도 코드 제거. 최종 실패 시 `False` 반환
+- **`login_kookmin_library()` 수정**: 로그인 버튼 클릭 시 Angular Material 오버레이(`cdk-overlay-backdrop`) 닫기 후 JS 폴백 클릭 적용
+- **`_relogin_and_setup()` 수정**: `access_ieee_via_library()` 실패 시 쿠키 삭제 루프 제거 (프로필 초기화로 대체)
 
 ---
 

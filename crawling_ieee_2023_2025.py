@@ -513,9 +513,15 @@ def setup_chrome_driver(download_dir, headless=False):
     """
     options = Options()
 
-    # Chrome 임시 프로필 디렉토리를 /tmp 대신 명시적 경로로 지정
-    # (서버에서 /tmp 가득 찼거나 권한 문제 시 "cannot create temp dir" 에러 방지)
+    # Chrome 프로필 디렉토리: 매 실행마다 완전히 초기화하여 이전 세션 쿠키/히스토리 제거
+    # (누적된 KIST 차단 관련 데이터가 재차 차단을 유발하는 문제 방지)
     chrome_tmp_dir = Path(download_dir).parent / '.chrome_profile'
+    if chrome_tmp_dir.exists():
+        import shutil
+        try:
+            shutil.rmtree(str(chrome_tmp_dir))
+        except Exception:
+            pass
     chrome_tmp_dir.mkdir(parents=True, exist_ok=True)
 
     # TMPDIR을 /tmp 대신 로컬 경로로 오버라이드
@@ -524,14 +530,6 @@ def setup_chrome_driver(download_dir, headless=False):
     chrome_local_tmp = Path('/data/khkim/chrome_tmp')
     chrome_local_tmp.mkdir(parents=True, exist_ok=True)
     os.environ['TMPDIR'] = str(chrome_local_tmp)
-    # 이전 실행에서 남겨진 SingletonLock 제거 (없으면 다음 Chrome 기동이 "already in use"로 실패)
-    for lock in ['SingletonLock', 'SingletonCookie', 'SingletonSocket']:
-        lock_path = chrome_tmp_dir / lock
-        if lock_path.exists():
-            try:
-                lock_path.unlink()
-            except Exception:
-                pass
     options.add_argument(f'--user-data-dir={chrome_tmp_dir}')
     options.add_argument('--no-first-run')
     options.add_argument('--no-default-browser-check')
@@ -732,11 +730,21 @@ def login_kookmin_library(driver, username, password):
         print('[OK] 비밀번호 입력')
         time.sleep(0.5)
 
-        # 로그인 버튼 클릭
+        # 로그인 버튼 클릭 (오버레이 backdrop 가로막을 경우 JS 클릭 폴백)
         login_btn = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH, XPATH_LOGIN_BTN))
+            EC.presence_of_element_located((By.XPATH, XPATH_LOGIN_BTN))
         )
-        login_btn.click()
+        # Angular Material 오버레이(cdk-overlay-backdrop) 닫기 시도
+        try:
+            overlay = driver.find_element(By.CSS_SELECTOR, '.cdk-overlay-backdrop')
+            driver.execute_script('arguments[0].click();', overlay)
+            time.sleep(1)
+        except Exception:
+            pass
+        try:
+            login_btn.click()
+        except Exception:
+            driver.execute_script('arguments[0].click();', login_btn)
         print('[OK] 로그인 버튼 클릭')
         time.sleep(4)
 
@@ -750,13 +758,23 @@ def login_kookmin_library(driver, username, password):
 
 # ==================== 2단계: IEEE 접속 (새 창 전환) ====================
 def access_ieee_via_library(driver):
+    """학술정보DB를 통해 IEEE Xplore 접속.
+
+    KIST 차단 페이지("웹서비스 차단 안내") 감지 시:
+      - 클릭 가능한 요소 없음 (서버 사이드 일시 차단)
+      - KIST 창 닫기 → 라이브러리 창으로 복귀 → 대기 후 IEEE 링크 재클릭 전략 사용
+      - 최대 3회 재시도 (2분, 5분 대기)
+    """
+    # KIST 차단 대기 시간 목록 (초 단위) — 재클릭 전 대기
+    KIST_WAIT_SECS = [120, 300]  # 2분, 5분
+
     print('='*60)
     print('2단계: 학술정보DB → IEEE Xplore 접속')
     print('='*60)
 
-    try:
+    def _click_ieee_link_and_get_window():
+        """DB_SEARCH_URL 에서 IEEE 링크를 찾아 클릭, 새 창 핸들 반환. 실패 시 None."""
         driver.get(DB_SEARCH_URL)
-        # Angular SSG 렌더링 대기 (최대 20초 폴링)
         ieee_link = None
         for _ in range(20):
             time.sleep(1)
@@ -767,54 +785,66 @@ def access_ieee_via_library(driver):
                     break
             if ieee_link:
                 break
-
         if not ieee_link:
-            raise Exception('IEEE 링크를 찾을 수 없음 (20초 대기 후)')
+            return None, None
 
         print(f'[OK] IEEE 링크 발견: {ieee_link.text[:60]}')
-        original_handles = set(driver.window_handles)
-        driver.execute_script('arguments[0].click();', ieee_link)  # JS 클릭 (Angular 라우터 호환)
+        before_handles = set(driver.window_handles)
+        lib_handle = driver.current_window_handle
+        driver.execute_script('arguments[0].click();', ieee_link)
         print('[OK] IEEE 링크 클릭 → 새 창 대기 중...')
+        try:
+            WebDriverWait(driver, 15).until(
+                lambda d: len(d.window_handles) > len(before_handles)
+            )
+        except Exception:
+            return None, lib_handle
+        new_h = (set(driver.window_handles) - before_handles).pop()
+        return new_h, lib_handle
 
-        # 새 창이 열릴 때까지 대기 (최대 15초)
-        WebDriverWait(driver, 15).until(
-            lambda d: len(d.window_handles) > len(original_handles)
-        )
+    try:
+        new_handle, lib_handle = _click_ieee_link_and_get_window()
+        if not new_handle:
+            raise Exception('IEEE 링크를 찾을 수 없거나 새 창이 열리지 않음')
 
-        # 새 창으로 전환
-        new_handle = (set(driver.window_handles) - original_handles).pop()
         driver.switch_to.window(new_handle)
-        # 프록시 세션 확립 + IEEE Xplore 렌더링 대기 (15초 필요)
         time.sleep(15)
-
         print(f'[OK] IEEE Xplore 창으로 전환 완료')
 
-        # ── KIST 보안경고 페이지 자동 통과 처리 ─────────────────────────
-        for _attempt in range(3):
-            cur_url = driver.current_url
-            if 'kist.kookmin.ac.kr' not in cur_url:
-                break  # 정상 URL → 탈출
-            print(f'[경고] KIST 보안경고 페이지 감지 ({_attempt+1}/3): {cur_url}')
-            # 확인/계속 버튼 클릭 시도
+        # ── KIST 차단 감지 시 재시도 ──────────────────────────────────────
+        # KIST 차단("웹서비스 차단 안내")은 서버 사이드 일시 차단으로 버튼 없음.
+        # 해결책: KIST 창 닫기 → 라이브러리 창 복귀 → N분 대기 → IEEE 링크 재클릭
+        for _ki, wait_sec in enumerate(KIST_WAIT_SECS):
+            if 'kist.kookmin.ac.kr' not in driver.current_url:
+                break
+            print(f'[경고] KIST 차단 페이지 감지 ({_ki+1}/{len(KIST_WAIT_SECS)+1}): {driver.current_url}')
+            print(f'  → KIST 창 닫기 → 라이브러리 창 복귀 → {wait_sec}초 대기 후 재시도')
+            # KIST 창 닫기
             try:
-                btns = driver.find_elements(
-                    By.XPATH,
-                    "//button[contains(., '확인') or contains(., '계속') or "
-                    "contains(., 'Confirm') or contains(., 'Continue') or "
-                    "contains(., '동의') or contains(., 'OK')]"
-                )
-                if btns:
-                    driver.execute_script('arguments[0].click();', btns[0])
-                    print(f'  → 버튼 클릭: {btns[0].text.strip()[:30]}')
-                    time.sleep(5)
-                    continue
+                driver.close()
             except Exception:
                 pass
-            # 버튼 없으면 IEEE 프록시 직접 접속
-            print('  → 버튼 없음, IEEE 프록시 직접 이동')
-            driver.get(IEEE_PROXY_HOME)
-            time.sleep(10)
-            break
+            # 라이브러리 창으로 복귀
+            try:
+                if lib_handle and lib_handle in driver.window_handles:
+                    driver.switch_to.window(lib_handle)
+                else:
+                    driver.switch_to.window(driver.window_handles[0])
+            except Exception:
+                pass
+            time.sleep(wait_sec)
+            # IEEE 링크 재클릭
+            new_handle, lib_handle = _click_ieee_link_and_get_window()
+            if not new_handle:
+                print('  → 재클릭 실패 (IEEE 링크 없음)')
+                break
+            driver.switch_to.window(new_handle)
+            time.sleep(15)
+            print(f'  → 재접속 URL: {driver.current_url}')
+
+        if 'kist.kookmin.ac.kr' in driver.current_url:
+            print('[경고] KIST 차단 해제 불가 → False 반환')
+            return False
 
         if 'Kookmin University' in driver.page_source or 'Access provided by' in driver.page_source:
             print('[OK] 국민대 프록시 인증 확인됨')
@@ -832,7 +862,7 @@ def access_ieee_via_library(driver):
             driver.get(IEEE_PROXY_HOME)
             time.sleep(10)
             return True
-        except:
+        except Exception:
             return False
 
 
@@ -1753,6 +1783,7 @@ def _relogin_and_setup(driver, year, config, username, password,
     if not login_kookmin_library(driver, username, password):
         print('[재로그인] 도서관 로그인 실패')
         return False
+    # access_ieee_via_library 내부에서 KIST 차단 시 최대 2분·5분 대기 후 재시도
     if not access_ieee_via_library(driver):
         print('[재로그인] IEEE 접속 실패')
         return False
