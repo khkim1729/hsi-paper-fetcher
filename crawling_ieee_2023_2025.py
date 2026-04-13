@@ -70,6 +70,11 @@ class TeeLogger:
         self.log_file.close()
 
 
+def _year_label(year):
+    """연도 표시 문자열. year='all' 이면 '전체 연도', 아니면 '{year}년' 반환."""
+    return '전체 연도' if str(year) == 'all' else f'{year}년'
+
+
 def setup_file_logger(save_base_path, year):
     """headless 실행 시 로그 디렉토리/파일 생성, TeeLogger 반환"""
     log_dir = Path(str(save_base_path) + '_logs') / str(year)
@@ -99,7 +104,7 @@ class CrawlStats:
         self.end_time        = ''
         self.elapsed_minutes = 0.0
         self._start_dt       = now
-        self.year_crawled    = int(year)
+        self.year_crawled    = str(year)   # 'all' 포함 허용
         self.journal         = journal
         self.pages_processed    = 0
         self.pages_skipped      = 0
@@ -1127,7 +1132,7 @@ def setup_keyword_search(driver, year, keyword):
                f'&newsearch=true&ranges={year}_{year}_Year'
                f'&queryText={q}&pageSize=10&pageNumber=1')
 
-        print(f'[키워드검색] "{keyword}" ({year}년) → URL 직접 이동')
+        print(f'[키워드검색] "{keyword}" ({_year_label(year)}) → URL 직접 이동')
         driver.get(url)
         time.sleep(12)
         WebDriverWait(driver, 20).until(
@@ -1725,7 +1730,7 @@ def _crawl_one_journal(driver, year, config, username, password,
         start_page: 시작 페이지 번호 (--resume 시 마지막 완료 페이지+1)
     """
     print(f"\n{'='*60}")
-    print(f'저널 크롤링 시작: {label_match}  ({year}년, p.{start_page}~)')
+    print(f'저널 크롤링 시작: {label_match}  ({_year_label(year)}, p.{start_page}~)')
     print(f"{'='*60}\n")
 
     # ── 검색 + 필터 설정 ────────────────────────────────────────────────
@@ -1842,7 +1847,7 @@ def _crawl_one_journal(driver, year, config, username, password,
 
     end_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f"\n{'='*60}")
-    print(f'[완료] {label_match} ({year}년)  종료: {end_ts}')
+    print(f'[완료] {label_match} ({_year_label(year)})  종료: {end_ts}')
     print(f"  페이지: {stats.pages_processed}개 완료, {stats.pages_skipped}개 건너뜀")
     print(f"  PDF: {stats.pdfs_extracted}개 추출, {stats.duplicates_skipped}개 중복")
     print(f"  Zip: {stats.zip_downloads}개  전체선택실패: {stats.select_all_failures}회")
@@ -1967,7 +1972,7 @@ def _crawl_with_journal_option(driver, year, config, username, password,
 
     end_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f"\n{'='*60}")
-    print(f'[완료] {label} ({year}년)  종료: {end_ts}')
+    print(f'[완료] {label} ({_year_label(year)})  종료: {end_ts}')
     print(f"  페이지: {stats.pages_processed}개 완료, {stats.pages_skipped}개 건너뜀")
     print(f"  PDF: {stats.pdfs_extracted}개 추출, {stats.duplicates_skipped}개 중복")
     print(f"  Zip: {stats.zip_downloads}개  전체선택실패: {stats.select_all_failures}회")
@@ -1992,7 +1997,7 @@ def _crawl_by_keyword(driver, year, config, username, password,
     label = f'[KW] {keyword}'
 
     print(f"\n{'='*60}")
-    print(f'키워드 크롤링 시작: "{keyword}"  ({year}년, p.{start_page}~)')
+    print(f'키워드 크롤링 시작: "{keyword}"  ({_year_label(year)}, p.{start_page}~)')
     print(f"{'='*60}\n")
 
     # ── 키워드 검색 URL 설정 ───────────────────────────────────────────────
@@ -2087,7 +2092,7 @@ def _crawl_by_keyword(driver, year, config, username, password,
 
     end_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f"\n{'='*60}")
-    print(f'[완료] 키워드 "{keyword}" ({year}년)  종료: {end_ts}')
+    print(f'[완료] 키워드 "{keyword}" ({_year_label(year)})  종료: {end_ts}')
     print(f"  페이지: {stats.pages_processed}개 완료, {stats.pages_skipped}개 건너뜀")
     print(f"  PDF: {stats.pdfs_extracted}개 추출, {stats.duplicates_skipped}개 중복")
     print(f"  Zip: {stats.zip_downloads}개  전체선택실패: {stats.select_all_failures}회")
@@ -2197,14 +2202,14 @@ def _do_year_crawl(driver, year, config, username, password,
 
             end_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             print(f"\n{'='*60}")
-            print(f'{year}년 저널 크롤링 완료!  저장 경로: {config.SAVE_PATH}')
+            print(f'{_year_label(year)} 저널 크롤링 완료!  저장 경로: {config.SAVE_PATH}')
             print(f'종료 시각: {end_ts}')
             print(f"{'='*60}\n")
 
         # ── 키워드 기반 추가 크롤링 (journal_option 모드에서도 실행 가능) ───
         if keyword_targets:
             print(f"\n{'#'*60}")
-            print(f'# {year}년 키워드 기반 크롤링 시작 ({len(keyword_targets)}개 키워드)')
+            print(f'# {_year_label(year)} 키워드 기반 크롤링 시작 ({len(keyword_targets)}개 키워드)')
             print(f"{'#'*60}\n")
 
             for kw_idx, keyword in enumerate(keyword_targets, 1):
@@ -2238,7 +2243,7 @@ def _do_year_crawl(driver, year, config, username, password,
 
             kw_end_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             print(f"\n{'='*60}")
-            print(f'{year}년 키워드 크롤링 완료!  종료 시각: {kw_end_ts}')
+            print(f'{_year_label(year)} 키워드 크롤링 완료!  종료 시각: {kw_end_ts}')
             print(f"{'='*60}\n")
 
     except KeyboardInterrupt:
@@ -2247,7 +2252,7 @@ def _do_year_crawl(driver, year, config, username, password,
         raise
     except Exception as e:
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        print(f'\n[ERROR] {year}년 크롤링 실패  [{ts}]: {e}')
+        print(f'\n[ERROR] {_year_label(year)} 크롤링 실패  [{ts}]: {e}')
         traceback.print_exc()
         raise
 
@@ -2526,7 +2531,7 @@ def main():
 
         for year in years:
             print(f"\n{'#'*60}")
-            print(f'# {year}년 크롤링 시작  [{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}]')
+            print(f'# {_year_label(year)} 크롤링 시작  [{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}]')
             print(f"{'#'*60}\n")
 
             config = CrawlConfig(year, save_base_path)

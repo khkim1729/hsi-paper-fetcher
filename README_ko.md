@@ -923,6 +923,14 @@ python tiktoken/scripts/json_token_counter.py "파일.json"
 
 ---
 
+### `--years all` 실행 시 `CrawlStats` 크래시 수정
+
+- **버그**: `CrawlStats.__init__` 에서 `int(year)` 호출 시 `year='all'` 이면 `ValueError` 발생하여 크롤링 즉시 종료
+- **수정**: `year_crawled = int(year)` → `year_crawled = str(year)` 로 변경 (CSV에 `all` 문자열로 저장)
+- **`_year_label(year)` 헬퍼 함수 추가**: `year='all'` 이면 `전체 연도`, 아니면 `{year}년` 반환. 로그 출력 `{year}년` → `{_year_label(year)}` 일괄 교체 (`_do_year_crawl`, `_crawl_one_journal`, `_crawl_by_keyword`, `_crawl_with_journal_option`, main 루프 포함)
+
+---
+
 ### `--journal-option` Publication Title 다중 선택 일괄 크롤 추가 (5차 개선)
 
 - **`JOURNAL_OPTION2_FIXED` 상수 추가**: `--journal-option 2` 용 4개 고정 저널 정의 (IEEE Access, Sensors Journal, IGARSS `{year}`, TGRS). `{year}` 는 크롤링 연도로 자동 치환
