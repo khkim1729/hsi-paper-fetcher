@@ -630,10 +630,20 @@ def check_seat_limit(driver):
 
 
 def is_session_expired(driver):
-    """프록시 세션 만료 여부 확인 (kookmin.ac.kr 세션 오류 페이지 감지)."""
+    """프록시 세션 만료 여부 확인 (kookmin.ac.kr 세션 오류·보안경고 페이지 감지).
+
+    감지 패턴:
+      - sessionfail / exceptproc  : 기존 세션 오류
+      - kist.kookmin.ac.kr        : KIST 보안경고 페이지 (security/warning.do)
+      - lib.kookmin.ac.kr/login   : 도서관 로그인 페이지로 리다이렉트
+    """
     try:
         url = driver.current_url
-        return 'sessionfail' in url or 'exceptproc' in url
+        return any(p in url for p in [
+            'sessionfail', 'exceptproc',
+            'kist.kookmin.ac.kr',
+            'lib.kookmin.ac.kr/login',
+        ])
     except:
         return False
 
@@ -779,6 +789,33 @@ def access_ieee_via_library(driver):
 
         print(f'[OK] IEEE Xplore 창으로 전환 완료')
 
+        # ── KIST 보안경고 페이지 자동 통과 처리 ─────────────────────────
+        for _attempt in range(3):
+            cur_url = driver.current_url
+            if 'kist.kookmin.ac.kr' not in cur_url:
+                break  # 정상 URL → 탈출
+            print(f'[경고] KIST 보안경고 페이지 감지 ({_attempt+1}/3): {cur_url}')
+            # 확인/계속 버튼 클릭 시도
+            try:
+                btns = driver.find_elements(
+                    By.XPATH,
+                    "//button[contains(., '확인') or contains(., '계속') or "
+                    "contains(., 'Confirm') or contains(., 'Continue') or "
+                    "contains(., '동의') or contains(., 'OK')]"
+                )
+                if btns:
+                    driver.execute_script('arguments[0].click();', btns[0])
+                    print(f'  → 버튼 클릭: {btns[0].text.strip()[:30]}')
+                    time.sleep(5)
+                    continue
+            except Exception:
+                pass
+            # 버튼 없으면 IEEE 프록시 직접 접속
+            print('  → 버튼 없음, IEEE 프록시 직접 이동')
+            driver.get(IEEE_PROXY_HOME)
+            time.sleep(10)
+            break
+
         if 'Kookmin University' in driver.page_source or 'Access provided by' in driver.page_source:
             print('[OK] 국민대 프록시 인증 확인됨')
         else:
@@ -793,7 +830,7 @@ def access_ieee_via_library(driver):
         try:
             print('[폴백] IEEE 프록시 URL 직접 접속 시도')
             driver.get(IEEE_PROXY_HOME)
-            time.sleep(5)
+            time.sleep(10)
             return True
         except:
             return False
@@ -810,20 +847,36 @@ def setup_ieee_advanced_search(driver, year):
     print(f'3단계: {"전체 연도" if year_str == "all" else year_str + "년"} Advanced Search 설정')
     print('='*60)
 
+    def _is_ieee_url(url):
+        return 'ieeexplore' in url.lower()
+
     try:
         current_url = driver.current_url
-        base_url = (
-            current_url.split('/Xplore')[0]
-            if '/Xplore' in current_url
-            else 'https://ieeexplore-ieee-org-ssl.proxy.kookmin.ac.kr'
-        )
+        # 현재 URL에서 base_url 추출 (IEEE URL이 아니면 프록시 홈 사용)
+        if '/Xplore' in current_url:
+            base_url = current_url.split('/Xplore')[0]
+        elif _is_ieee_url(current_url):
+            base_url = current_url.split('/search')[0].split('/Xplore')[0]
+        else:
+            base_url = 'https://ieeexplore-ieee-org-ssl.proxy.kookmin.ac.kr'
         search_url = f'{base_url}/search/advanced'
+
+        # 현재 URL 이 IEEE 가 아니면 (보안경고 등) 즉시 False
+        if not _is_ieee_url(current_url):
+            print(f'[경고] Advanced Search 진입 전 비정상 URL: {current_url}')
+            return False
 
         print(f'Advanced Search: {search_url}')
         driver.get(search_url)
         time.sleep(5)
         driver.refresh()
         time.sleep(5)
+
+        # 페이지 로딩 후 URL 재확인
+        after_nav_url = driver.current_url
+        if not _is_ieee_url(after_nav_url):
+            print(f'[경고] Advanced Search 이동 후 비정상 URL: {after_nav_url}')
+            return False
 
         # ── year='all': 연도 필터 없이 검색 버튼만 클릭 ─────────────────
         if year_str == 'all':
@@ -842,7 +895,12 @@ def setup_ieee_advanced_search(driver, year):
                 print(f'[폴백] 전체연도 URL 직접 이동: {fallback_url}')
                 driver.get(fallback_url)
                 time.sleep(10)
-            print(f'현재 URL: {driver.current_url}\n')
+            # 최종 URL 검증
+            final_url = driver.current_url
+            print(f'현재 URL: {final_url}\n')
+            if not _is_ieee_url(final_url):
+                print(f'[경고] 전체연도 검색 후 비정상 URL: {final_url}')
+                return False
             return True
 
         # Year Range 라디오 버튼 클릭 (날짜범위 대신 연도범위 선택)
@@ -1878,11 +1936,9 @@ def _crawl_with_journal_option(driver, year, config, username, password,
     print(f"{'='*60}\n")
 
     # ── 검색 + 필터 설정 ─────────────────────────────────────────────────
-    if not setup_ieee_advanced_search(driver, year):
-        print('[경고] Advanced Search 실패 → 건너뜀')
-        return
-
-    if is_session_expired(driver):
+    # setup 실패 or 세션 만료(보안경고 포함) 시 재로그인 후 재시도
+    if not setup_ieee_advanced_search(driver, year) or is_session_expired(driver):
+        print('[경고] Advanced Search 실패 또는 세션 만료 → 재로그인 시도')
         if not _relogin_and_setup(driver, year, config, username, password,
                                   stats=stats, journal_option=option):
             print('[경고] 재로그인 실패 → 건너뜀')
