@@ -47,14 +47,19 @@ Hyperspectral Imaging(HSI) 및 Remote Sensing 관련 논문 PDF 대용량 수집
 hsi-paper-fetcher/
 ├── crawling_ieee_2023_2025.py    # IEEE TGRS PDF 일괄 다운로드 (메인 스크립트)
 ├── Crawling_IEEE_year.ipynb      # IEEE 연도별 크롤링 (노트북 버전)
-├── Crawling_ScienceDirect.ipynb  # ScienceDirect 크롤링
+├── Crawling_ScienceDirect.ipynb  # ScienceDirect 크롤링 (참고용 프로토타입)
 ├── Crawling_wiki.py              # 위키피디아 API 크롤링
 ├── credentials.json              # 기관 로그인 정보 (gitignore 처리됨)
 ├── wiki_data.json                # 위키피디아 크롤링 결과
 ├── wiki_data.jsonl               # 벡터 DB용 (JSONL)
-└── tiktoken/scripts/
-    ├── pdf_token_counter.py
-    └── json_token_counter.py
+├── tiktoken/scripts/
+│   ├── pdf_token_counter.py
+│   └── json_token_counter.py
+└── crawler_sciencedirect/        # ScienceDirect 크롤러 패키지
+    ├── crawling_km_ScienceDirect.py     # PDF 일괄 다운로드 (메인 스크립트)
+    ├── count_ScienceDirect.py           # 저널별 논문/페이지 수 사전 조회
+    ├── count_results_ScienceDirect.txt  # count_ScienceDirect.py 실행 결과
+    └── README_ScienceDirect.md          # ScienceDirect 크롤러 문서
 ```
 
 ---
@@ -881,14 +886,21 @@ IEEE TGRS 논문 크롤러 시작
 
 ## ScienceDirect 크롤링
 
-**파일**: `Crawling_ScienceDirect.ipynb`
+자세한 내용은 **[crawler_sciencedirect/README_ScienceDirect.md](crawler_sciencedirect/README_ScienceDirect.md)** 를 참고하세요.
 
-```python
-TITLE = "Remote Sensing of Environment"
-SET_YEAR = "2001"
-START_PAGE = 1
-MAX_PAGE_VISITS = 300
+### 빠른 실행
+
+```bash
+cd crawler_sciencedirect
+
+# 2023년 전체 저널 (헤드리스)
+python crawling_km_ScienceDirect.py --headless --years 2023 --journal-option all
+
+# 논문/페이지 수 사전 조회
+python count_ScienceDirect.py --headless --years 2023
 ```
+
+참고용 프로토타입: `Crawling_ScienceDirect.ipynb` (가천대 프록시 기반)
 
 ---
 

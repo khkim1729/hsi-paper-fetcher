@@ -1,0 +1,28 @@
+========================================================================
+  ScienceDirect 저널별 논문/페이지 수 카운트 결과
+  실행 시각 : 2026-04-14 15:20:05
+  조회 연도 : ['2023']
+========================================================================
+
+[연도: 2023년]
+   #  저널                                                              총 논문 수      페이지 수
+  --  ----------------------------------------------------------  ----------  ---------
+   1  Remote Sensing of Environment                                      613         25
+   2  ISPRS Journal of Photogrammetry and Remote Sensing                 290         12
+   3  International Journal of Applied Earth Observation and Geo         355         15
+   4  Advances in Space Research                                         775         31
+   5  Information Fusion                                                 338         14
+   6  Pattern Recognition                                              1,056         43
+   7  Neural Networks                                                    529         22
+   8  Signal Processing                                                3,172        127
+   9  Neurocomputing                                                     919         37
+  10  Expert Systems with Applications                                 2,198         88
+  11  Knowledge-Based Systems                                            891         36
+  12  Computers and Geosciences                                          123          5
+  13  Computer Vision and Image Understanding                            N/A        N/A
+  14  Image and Vision Computing                                         N/A        N/A
+  15  The Egyptian Journal of Remote Sensing and Space Sciences          N/A        N/A
+
+========================================================================
+  저널 수: 15  조회 연도: 1개  성공: 12  실패(N/A): 3
+========================================================================

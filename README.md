@@ -12,14 +12,19 @@ A collection of crawling tools for downloading Hyperspectral Imaging (HSI) resea
 hsi-paper-fetcher/
 ├── crawling_ieee_2023_2025.py    # IEEE TGRS bulk PDF downloader (main script)
 ├── Crawling_IEEE_year.ipynb      # IEEE year-based crawling (notebook)
-├── Crawling_ScienceDirect.ipynb  # ScienceDirect crawling
+├── Crawling_ScienceDirect.ipynb  # ScienceDirect prototype (reference notebook)
 ├── Crawling_wiki.py              # Wikipedia API crawling
 ├── credentials.json              # Institutional login credentials (gitignored)
 ├── wiki_data.json                # Wikipedia crawling results
 ├── wiki_data.jsonl               # For vector databases (JSONL)
-└── tiktoken/scripts/
-    ├── pdf_token_counter.py
-    └── json_token_counter.py
+├── tiktoken/scripts/
+│   ├── pdf_token_counter.py
+│   └── json_token_counter.py
+└── crawler_sciencedirect/        # ScienceDirect crawler package
+    ├── crawling_km_ScienceDirect.py     # Bulk PDF downloader (main script)
+    ├── count_ScienceDirect.py           # Count papers/pages per journal
+    ├── count_results_ScienceDirect.txt  # Output of count_ScienceDirect.py
+    └── README_ScienceDirect.md          # ScienceDirect crawler documentation
 ```
 
 ---
@@ -117,14 +122,21 @@ python crawling_ieee_2023_2025.py --year 2023 --username myid --password mypw
 
 ## ScienceDirect Crawling
 
-**File**: `Crawling_ScienceDirect.ipynb`
+See **[crawler_sciencedirect/README_ScienceDirect.md](crawler_sciencedirect/README_ScienceDirect.md)** for full documentation.
 
-```python
-TITLE = "Remote Sensing of Environment"
-SET_YEAR = "2001"
-START_PAGE = 1
-MAX_PAGE_VISITS = 300
+### Quick Start
+
+```bash
+cd crawler_sciencedirect
+
+# All journals, 2023, headless
+python crawling_km_ScienceDirect.py --headless --years 2023 --journal-option all
+
+# Count papers/pages before crawling
+python count_ScienceDirect.py --headless --years 2023
 ```
+
+Reference prototype: `Crawling_ScienceDirect.ipynb`
 
 ---
 
