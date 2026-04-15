@@ -1109,7 +1109,11 @@ def parse_args():
                    help=f'키워드 목록 파일 경로 (기본: {DEFAULT_WORD_LIST})')
     p.add_argument('--keywords-only', action='store_true',
                    help='키워드 크롤링만 실행 (저널 크롤링 건너뜀)')
-    return p.parse_args()
+    args = p.parse_args()
+    # --num-keywords 지정 시 --journal-option 없으면 자동으로 keywords-only
+    if args.num_keywords and not args.journal_option:
+        args.keywords_only = True
+    return args
 
 
 # ==================== main ====================
