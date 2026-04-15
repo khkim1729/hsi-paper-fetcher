@@ -7,11 +7,11 @@ ScienceDirect(Elsevier) 논문 PDF 대용량 크롤러
 흐름:
   1. 도서관 로그인  https://lib.kookmin.ac.kr/login?...
   2. ScienceDirect DB 페이지 이동 → 링크 클릭 → 새 창으로 SD 프록시 열림
-  3. 저널별 검색 URL로 이동 (연도 + articleTypes=FLA 필터)
-  4. 페이지별 전체 선택 → PDF 다운로드
+  3. 저널별(또는 키워드별) 검색 URL로 이동 (연도 + articleTypes=FLA 필터)
+  4. 페이지별 전체 선택 → PDF 다운로드 (중복 파일 자동 건너뜀)
 
 실행 예시:
-  # 기본 (Remote Sensing of Environment, 2023년, headless)
+  # 기본 (전체 15개 저널, 2023년, headless)
   python crawling_km_ScienceDirect.py --headless --years 2023
 
   # 여러 연도
@@ -23,7 +23,19 @@ ScienceDirect(Elsevier) 논문 PDF 대용량 크롤러
   # 저널 옵션 (1=RSE, 2=상위4개, 3=상위8개, all=전체15개)
   python crawling_km_ScienceDirect.py --headless --years 2023 --journal-option 2
 
-  # 재개
+  # 키워드 크롤링 — word_list.txt 위에서 N개 사용
+  python crawling_km_ScienceDirect.py --headless --years 2023 --num-keywords 20
+
+  # 키워드 크롤링 — 전체 키워드 사용
+  python crawling_km_ScienceDirect.py --headless --years 2023 --num-keywords all
+
+  # 키워드만 크롤링 (저널 건너뜀)
+  python crawling_km_ScienceDirect.py --headless --years 2023 --keywords-only --num-keywords 30
+
+  # 저널 + 키워드 함께 크롤링
+  python crawling_km_ScienceDirect.py --headless --years 2023 --journal-option 2 --num-keywords 50
+
+  # 재개 (저널·키워드 모두 이어서)
   python crawling_km_ScienceDirect.py --headless --years 2023 --resume
 
   # 진행 상황 확인
@@ -72,6 +84,9 @@ CHROMEDRIVER_BIN = '/data/khkim/chrome_local/chromedriver-linux64/chromedriver'
 
 # ScienceDirect 프록시 베이스 URL (자동 발견 후 설정됨)
 SD_PROXY_BASE = ''
+
+# 키워드 목록 기본 경로 (crawler_sciencedirect/ → hsi-paper-fetcher/ → lists/)
+DEFAULT_WORD_LIST = Path(__file__).parent.parent / 'lists' / 'list_words' / 'word_list.txt'
 
 # 다운로드 대기 (ScienceDirect는 ZIP 한 건씩 내려받음, 최대 20개/페이지)
 DOWNLOAD_WAIT_SECONDS = 300
@@ -132,6 +147,26 @@ JOURNAL_TARGETS = [
      'The Egyptian Journal of Remote Sensing and Space Sciences',
      '원격탐사 응용'),
 ]
+
+
+# ==================== 키워드 로더 ====================
+def load_keywords(path=None, n=None):
+    """word_list.txt에서 키워드를 로드한다.
+
+    Args:
+        path: 파일 경로. None이면 DEFAULT_WORD_LIST 사용.
+        n   : 위에서부터 가져올 개수. None 또는 'all'이면 전체.
+    Returns:
+        키워드 문자열 리스트 (빈 줄 제거)
+    """
+    p = Path(path) if path else DEFAULT_WORD_LIST
+    if not p.exists():
+        print(f'[경고] word_list 파일 없음: {p}')
+        return []
+    lines = [l.strip() for l in p.read_text(encoding='utf-8').splitlines() if l.strip()]
+    if n is not None and str(n) != 'all':
+        lines = lines[:int(n)]
+    return lines
 
 
 # ==================== 로거 ====================
@@ -586,6 +621,31 @@ def navigate_to_search(driver, journal_label, journal_pub_param, year):
     return True
 
 
+def build_keyword_search_url(keyword, year):
+    """키워드 전문 검색 URL 생성 (qs= 파라미터)"""
+    if not SD_PROXY_BASE:
+        return None
+    kw_enc = quote_plus(keyword)
+    base = f'{SD_PROXY_BASE}/search?qs={kw_enc}&articleTypes=FLA'
+    if str(year) != 'all':
+        base += f'&date={year}'
+    return base
+
+
+def navigate_to_keyword_search(driver, keyword, year):
+    """키워드 검색 페이지 이동. 성공 시 True."""
+    url = build_keyword_search_url(keyword, year)
+    if not url:
+        print('[경고] SD 프록시 URL 미설정 → 키워드 검색 불가')
+        return False
+    print(f'[키워드 검색] {url}')
+    driver.get(url)
+    time.sleep(8)
+    if is_session_expired(driver):
+        return False
+    return True
+
+
 # ==================== 결과 수 파악 ====================
 def get_total_results(driver):
     """현재 페이지 총 검색 결과 수 반환. 실패 시 -1."""
@@ -923,6 +983,104 @@ def crawl_one_journal(driver, journal_label, journal_pub_param, year,
     write_stats_row(stats)
 
 
+# ==================== 키워드 크롤링 ====================
+def _relogin_and_keyword_setup(driver, keyword, year, username, password, stats):
+    """키워드 크롤링 중 세션 만료 시 재로그인 후 키워드 검색 복구."""
+    print('[재로그인] SD 세션 만료 → 재로그인')
+    if stats:
+        stats.session_relogins += 1
+    if not login_kookmin_library(driver, username, password):
+        return False
+    if not access_sd_via_library(driver):
+        return False
+    if not navigate_to_keyword_search(driver, keyword, year):
+        return False
+    return True
+
+
+def crawl_one_keyword(driver, keyword, year, save_path, username, password,
+                      progress, stats, start_page=1):
+    """단일 키워드의 전 페이지 PDF 다운로드.
+
+    저장 경로는 저널 크롤링과 동일한 {year}/ 디렉토리를 사용하므로
+    이미 다운로드된 파일은 extract_zip 에서 자동으로 건너뜀(중복 제거).
+    progress 키: '[KW] {keyword}'
+    """
+    label = f'[KW] {keyword}'
+    print(f'\n{"="*60}')
+    print(f'키워드 크롤링: "{keyword}"  ({_year_label(year)}, p.{start_page}~)')
+    print('='*60)
+
+    if not navigate_to_keyword_search(driver, keyword, year):
+        if is_session_expired(driver):
+            if not _relogin_and_keyword_setup(driver, keyword, year,
+                                              username, password, stats):
+                return
+        else:
+            print('[경고] 키워드 검색 이동 실패 → 건너뜀')
+            return
+
+    if not has_search_results(driver):
+        print(f'[완료] "{keyword}": 검색 결과 없음')
+        progress.mark_completed(label, 0, 0)
+        return
+
+    total = get_total_results(driver)
+    if total > 0:
+        print(f'[INFO] 총 {total:,}건 검색됨')
+
+    # start_page > 1 이면 Next 버튼으로 목표 페이지 이동
+    current_page = get_current_page_number(driver)
+    if start_page > current_page:
+        print(f'[RESUME] 페이지 {start_page}로 이동 중...')
+        for _ in range(start_page - current_page):
+            nxt = go_to_next_page(driver)
+            if nxt is None:
+                print('[경고] 목표 페이지 도달 불가')
+                return
+        current_page = start_page
+
+    last_completed = current_page - 1
+    consecutive_fails = 0
+    MAX_CONSECUTIVE = 3
+
+    while True:
+        if is_session_expired(driver):
+            if not _relogin_and_keyword_setup(driver, keyword, year,
+                                              username, password, stats):
+                break
+            for _ in range(current_page - 1):
+                go_to_next_page(driver)
+
+        if not has_search_results(driver):
+            print(f'[완료] "{keyword}": p.{current_page} 빈 페이지 → 종료')
+            progress.mark_completed(label, last_completed, stats.pdfs_extracted)
+            break
+
+        ok = process_page(driver, current_page, save_path, stats)
+        if ok:
+            consecutive_fails = 0
+            last_completed = current_page
+            progress.update(label, current_page, stats.pdfs_extracted)
+            stats.checkpoint()
+        else:
+            consecutive_fails += 1
+            stats.pages_skipped += 1
+            if consecutive_fails >= MAX_CONSECUTIVE:
+                print(f'[중단] "{keyword}": {consecutive_fails}페이지 연속 실패 → 종료')
+                break
+
+        nxt = go_to_next_page(driver)
+        if nxt is None:
+            print(f'[완료] "{keyword}": 마지막 페이지 → 종료')
+            progress.mark_completed(label, last_completed, stats.pdfs_extracted)
+            break
+        current_page = nxt
+
+    stats.finalize()
+    write_stats_row(stats)
+
+
 # ==================== CLI 파싱 ====================
 def parse_args():
     p = argparse.ArgumentParser(
@@ -941,6 +1099,14 @@ def parse_args():
     p.add_argument('--journal-option', type=str, default=None,
                    choices=['1', '2', '3', 'all'],
                    help='저널 범위: 1=RSE only, 2=상위4, 3=상위8, all=전체15개')
+    p.add_argument('--num-keywords', type=str, default=None,
+                   metavar='N|all',
+                   help='키워드 크롤링 활성화: word_list.txt 상위 N개 또는 all(전체)')
+    p.add_argument('--word-list', type=str, default=None,
+                   metavar='PATH',
+                   help=f'키워드 목록 파일 경로 (기본: {DEFAULT_WORD_LIST})')
+    p.add_argument('--keywords-only', action='store_true',
+                   help='키워드 크롤링만 실행 (저널 크롤링 건너뜀)')
     return p.parse_args()
 
 
@@ -987,6 +1153,14 @@ def main():
     else:
         journals = JOURNAL_TARGETS  # all
 
+    # 키워드 목록 로드
+    keywords = []
+    if args.num_keywords:
+        n = None if args.num_keywords == 'all' else args.num_keywords
+        keywords = load_keywords(args.word_list, n)
+        if not keywords:
+            print('[경고] 키워드 목록이 비어있습니다. --word-list 경로를 확인하세요.')
+
     save_path = args.save_path
     year_lbl  = '전체 연도' if years == ['all'] else ' / '.join(str(y) for y in years)
 
@@ -994,7 +1168,10 @@ def main():
     print('ScienceDirect PDF 크롤러 시작')
     print('='*60)
     print(f'  대상 연도  : {year_lbl}')
-    print(f'  저널 범위  : {jopt or "all"} ({len(journals)}개)')
+    if not args.keywords_only:
+        print(f'  저널 범위  : {jopt or "all"} ({len(journals)}개)')
+    if keywords:
+        print(f'  키워드 수  : {len(keywords)}개 ({"전체" if args.num_keywords == "all" else f"상위 {args.num_keywords}개"})')
     print(f'  저장 경로  : {save_path}')
     print(f'  headless   : {args.headless}')
     print(f'  재개 모드  : {"ON" if args.resume else "OFF"}')
@@ -1023,16 +1200,34 @@ def main():
                 print('[오류] ScienceDirect 접속 실패')
                 continue
 
-            for label, pub_param, _ in journals:
-                stats = CrawlStats(year, label)
-                start_page = progress.get_start_page(label, args.resume)
+            # ── 저널 크롤링 ──────────────────────────────────────────────
+            if not args.keywords_only:
+                for label, pub_param, _ in journals:
+                    stats = CrawlStats(year, label)
+                    start_page = progress.get_start_page(label, args.resume)
+                    crawl_one_journal(
+                        driver, label, pub_param, year,
+                        year_save_path, username, password,
+                        progress, stats, start_page=start_page
+                    )
+                    time.sleep(5)
 
-                crawl_one_journal(
-                    driver, label, pub_param, year,
-                    year_save_path, username, password,
-                    progress, stats, start_page=start_page
-                )
-                time.sleep(5)
+            # ── 키워드 크롤링 ─────────────────────────────────────────────
+            if keywords:
+                print(f'\n{"#"*60}')
+                print(f'# 키워드 크롤링 시작: {len(keywords)}개 키워드')
+                print(f'{"#"*60}')
+                for kw_idx, keyword in enumerate(keywords, 1):
+                    kw_label = f'[KW] {keyword}'
+                    stats = CrawlStats(year, kw_label)
+                    start_page = progress.get_start_page(kw_label, args.resume)
+                    print(f'\n[KW {kw_idx}/{len(keywords)}] "{keyword}"  (p.{start_page}~)')
+                    crawl_one_keyword(
+                        driver, keyword, year,
+                        year_save_path, username, password,
+                        progress, stats, start_page=start_page
+                    )
+                    time.sleep(5)
 
         except KeyboardInterrupt:
             print('\n[중단] 사용자 인터럽트')
