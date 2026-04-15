@@ -370,7 +370,7 @@ def get_count_via_requests(session, pub_param, year=None):
     return -1
 
 
-INTER_REQUEST_DELAY = 12   # 요청 간 딜레이 (초) — 빠른 요청 시 SD 봇 탐지 방지
+INTER_REQUEST_DELAY = 18   # 요청 간 딜레이 (초) — 빠른 요청 시 SD 봇 탐지 방지
 BROWSER_POLL_TIMEOUT  = 90  # body.innerText 폴링 최대 시간 (초)
 BROWSER_POLL_INTERVAL = 2   # 폴링 간격 (초)
 

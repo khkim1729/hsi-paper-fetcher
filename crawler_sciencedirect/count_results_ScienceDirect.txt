@@ -1,6 +1,6 @@
 ========================================================================
   ScienceDirect 저널별 논문/페이지 수 카운트 결과
-  실행 시각 : 2026-04-14 15:20:05
+  실행 시각 : 2026-04-15 10:35:40
   조회 연도 : ['2023']
 ========================================================================
 
@@ -19,10 +19,10 @@
   10  Expert Systems with Applications                                 2,198         88
   11  Knowledge-Based Systems                                            891         36
   12  Computers and Geosciences                                          123          5
-  13  Computer Vision and Image Understanding                            N/A        N/A
-  14  Image and Vision Computing                                         N/A        N/A
-  15  The Egyptian Journal of Remote Sensing and Space Sciences          N/A        N/A
+  13  Computer Vision and Image Understanding                            175          7
+  14  Image and Vision Computing                                         166          7
+  15  The Egyptian Journal of Remote Sensing and Space Sciences           83          4
 
 ========================================================================
-  저널 수: 15  조회 연도: 1개  성공: 12  실패(N/A): 3
+  저널 수: 15  조회 연도: 1개  성공: 15  실패(N/A): 0
 ========================================================================

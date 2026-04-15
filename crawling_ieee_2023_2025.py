@@ -50,6 +50,25 @@ from selenium.common.exceptions import TimeoutException
 warnings.filterwarnings('ignore')
 
 
+# ==================== 드라이버 사망 감지 ====================
+class DriverDeadError(RuntimeError):
+    """ChromeDriver 프로세스가 소멸하여 WebDriver 통신 불가 상태."""
+    pass
+
+
+def is_driver_dead(exc):
+    """예외가 드라이버/chromedriver 프로세스 종료에 의한 것인지 판별."""
+    msg = str(exc)
+    return any(kw in msg for kw in (
+        'Connection refused',
+        'Max retries exceeded',
+        'HTTPConnectionPool',
+        'NewConnectionError',
+        'Failed to establish a new connection',
+        'chrome not reachable',
+    ))
+
+
 # ==================== 로거 (headless 전용) ====================
 class TeeLogger:
     """stdout 출력을 콘솔과 로그 파일에 동시에 기록"""
@@ -555,7 +574,7 @@ def setup_chrome_driver(download_dir, headless=False):
     options.add_argument('--disable-blink-features=AutomationControlled')
     options.add_argument('--window-size=1920,1080')
     options.add_argument(
-        'user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
         'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36'
     )
     options.add_experimental_option('excludeSwitches', ['enable-automation', 'enable-logging'])
@@ -1527,7 +1546,17 @@ def trigger_download(driver, config, page_number=1, stats=None):
         # 3) 새로 나타난 파일(zip 또는 pdf)이 저장 폴더에 나타날 때까지 대기
         print(f'[대기] 다운로드 중... (최대 {config.DOWNLOAD_WAIT_SECONDS}초, crdownload 감지 시 +600초)')
         STALL_TIMEOUT = 300  # 크기 변화 없으면 stall 판정 (초) — 대용량 zip 완료 후 Chrome 재명 대기 포함
+        DRIVER_PING_INTERVAL = 30  # 드라이버 생존 확인 간격 (초)
+        last_driver_ping = time.time()
         while time.time() < download_deadline:
+            # 드라이버 생존 확인 (30초마다)
+            if time.time() - last_driver_ping >= DRIVER_PING_INTERVAL:
+                try:
+                    driver.execute_script("return 1;")
+                    last_driver_ping = time.time()
+                except Exception as ping_err:
+                    if is_driver_dead(ping_err):
+                        raise DriverDeadError(f'다운로드 대기 중 Chrome 프로세스 소멸: {ping_err}')
             for f in save_dir.iterdir():
                 if not f.is_file():
                     continue
@@ -2244,6 +2273,8 @@ def _do_year_crawl(driver, year, config, username, password,
                 stats.finalize()
                 write_stats_row(stats)
                 raise
+            except DriverDeadError:
+                raise  # finally 블록이 stats 처리. 호출자로 전파.
             except Exception as e:
                 ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 print(f'[ERROR] journal-option{journal_option} 크롤링 실패 [{ts}]: {e}')
@@ -2281,6 +2312,8 @@ def _do_year_crawl(driver, year, config, username, password,
                     stats.finalize()
                     write_stats_row(stats)
                     raise
+                except DriverDeadError:
+                    raise  # finally 블록이 stats 처리. 호출자로 전파.
                 except Exception as e:
                     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     print(f'[ERROR] {label_match} 크롤링 실패 [{ts}]: {e}')
@@ -2647,6 +2680,30 @@ def main():
                                journal_option=journal_option)
             except KeyboardInterrupt:
                 interrupted = True
+            except DriverDeadError as dead_err:
+                # Chrome 프로세스 소멸 → 드라이버 재시작 후 resume 으로 재개
+                ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                print(f'\n[드라이버 재시작] Chrome 소멸 감지 [{ts}]: {dead_err}')
+                print('[드라이버 재시작] 새 드라이버 생성 + 재로그인 → resume 모드로 재개...')
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+                try:
+                    driver = setup_chrome_driver(str(config.SAVE_PATH), headless=args.headless)
+                    if (login_kookmin_library(driver, username, password)
+                            and access_ieee_via_library(driver)):
+                        print('[드라이버 재시작] 재로그인 성공 → resume 재개')
+                        _do_year_crawl(driver, year, config, username, password,
+                                       journal_targets=effective_targets if effective_targets else None,
+                                       num_journals=effective_num_journals,
+                                       keyword_targets=effective_keywords,
+                                       resume=True,  # 이어서 재개
+                                       journal_option=journal_option)
+                    else:
+                        print('[드라이버 재시작] 재로그인 실패 → 해당 연도 건너뜀')
+                except Exception as restart_err:
+                    print(f'[드라이버 재시작] 재시작 실패: {restart_err}')
             except Exception:
                 pass  # _do_year_crawl 에서 이미 출력
             finally:
