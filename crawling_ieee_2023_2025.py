@@ -678,54 +678,70 @@ def has_search_results(driver):
     빈 페이지(마지막 페이지를 초과한 경우 등)를 감지해 False 를 반환한다.
     크롤링 루프에서 이 함수가 False 를 반환하면 해당 저널 크롤링을 종료한다.
     """
-    try:
-        time.sleep(3)
+    MAX_CHECK_ATTEMPTS = 3
+    for attempt in range(MAX_CHECK_ATTEMPTS):
+        try:
+            # 첫 시도 5초, 이후 시도 10초 대기
+            wait_sec = 5 if attempt == 0 else 10
+            time.sleep(wait_sec)
 
-        # ── 결과 항목 요소 확인 ──────────────────────────────────────────
-        result_selectors = [
-            'xpl-result-item',
-            '.List-results-items li',
-            '.result-item',
-            '[class*="result-item"]',
-        ]
-        for sel in result_selectors:
-            items = driver.find_elements(By.CSS_SELECTOR, sel)
-            if len(items) > 0:
-                return True
-
-        # ── "No results" 텍스트 패턴 ──────────────────────────────────────
-        src_lower = driver.page_source.lower()
-        no_result_phrases = [
-            'no results found', '0 results', 'returned no results',
-            'did not match any', 'we could not find', 'no documents found',
-        ]
-        if any(p in src_lower for p in no_result_phrases):
-            print('[감지] 검색 결과 0건 텍스트 발견 → 저널 마지막 페이지 초과')
-            return False
-
-        # ── 결과 헤더에서 숫자 확인 ──────────────────────────────────────
-        header_selectors = [
-            '.Dashboard-header',
-            '.results-count',
-            'span.ng-star-inserted',
-            '[class*="results-header"]',
-        ]
-        for sel in header_selectors:
-            for el in driver.find_elements(By.CSS_SELECTOR, sel):
-                txt = el.text.strip()
-                if txt and ('result' in txt.lower() or ' of ' in txt.lower()):
-                    if re.search(r'\b0\b', txt):
-                        print(f'[감지] 결과 0건 헤더 발견: "{txt}" → 저널 마지막 페이지 초과')
-                        return False
+            # ── 결과 항목 요소 확인 ──────────────────────────────────────────
+            result_selectors = [
+                'xpl-result-item',
+                '.List-results-items li',
+                '.result-item',
+                '[class*="result-item"]',
+                'div.List-results-items',
+            ]
+            for sel in result_selectors:
+                items = driver.find_elements(By.CSS_SELECTOR, sel)
+                if len(items) > 0:
                     return True
 
-        # 결과 항목도 없고 헤더도 확인 안 됨 → 빈 페이지로 판단
-        print('[감지] 결과 아이템·헤더 미발견 → 빈 페이지 (저널 마지막 페이지 초과)')
-        return False
+            # ── "No results" 텍스트 패턴 ──────────────────────────────────────
+            src_lower = driver.page_source.lower()
+            no_result_phrases = [
+                'no results found', '0 results', 'returned no results',
+                'did not match any', 'we could not find', 'no documents found',
+            ]
+            if any(p in src_lower for p in no_result_phrases):
+                # 진짜 0건인 경우 (텍스트 명시)
+                if '0 results' in src_lower or 'no results' in src_lower:
+                    print('[감지] 검색 결과 0건 텍스트 발견 → 저널 마지막 페이지 초과')
+                    return False
 
-    except Exception as e:
-        print(f'[경고] 결과 존재 확인 실패 ({e}) → 결과 있다고 가정')
-        return True
+            # ── 결과 헤더에서 숫자 확인 ──────────────────────────────────────
+            header_selectors = [
+                '.Dashboard-header',
+                '.results-count',
+                'span.ng-star-inserted',
+                '[class*="results-header"]',
+            ]
+            for sel in header_selectors:
+                for el in driver.find_elements(By.CSS_SELECTOR, sel):
+                    txt = el.text.strip()
+                    if txt and ('result' in txt.lower() or ' of ' in txt.lower()):
+                        # "0 Results" 또는 "Showing 0" 등 확인
+                        if re.search(r'\b0\b', txt) and not re.search(r'[1-9]', txt.split('result')[0]):
+                             print(f'[감지] 결과 0건 헤더 발견: "{txt}" → 저널 마지막 페이지 초과')
+                             return False
+                        return True
+
+            if attempt < MAX_CHECK_ATTEMPTS - 1:
+                print(f'[INFO] 결과 항목 미발견 (시도 {attempt+1}/{MAX_CHECK_ATTEMPTS}), 재시도 중...')
+                driver.execute_script("window.scrollTo(0, 200);")
+                time.sleep(2)
+                driver.execute_script("window.scrollTo(0, 0);")
+            else:
+                # 마지막 시도까지 실패
+                print('[감지] 결과 아이템·헤더 미발견 → 빈 페이지 (저널 마지막 페이지 초과)')
+                return False
+
+        except Exception as e:
+            if attempt < MAX_CHECK_ATTEMPTS - 1:
+                continue
+            print(f'[경고] 결과 존재 확인 실패 ({e}) → 결과 있다고 가정')
+            return True
 
 
 # ==================== 1단계: 국민대 도서관 로그인 ====================

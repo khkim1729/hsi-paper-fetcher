@@ -653,14 +653,16 @@ def get_total_results(driver):
     """현재 페이지 총 검색 결과 수 반환. 실패 시 -1."""
     try:
         # ScienceDirect 결과 수 표시 패턴 시도
-        for selector in [
+        selectors = [
             "//h2[contains(@class,'search-body-results-count')]",
             "//*[contains(@class,'search-body-results-count')]",
             "//*[@data-aa-name='results-count-text']",
             "//div[contains(@class,'result-count')]",
             "//*[contains(text(),' results')]",
             "//*[contains(text(),' Results')]",
-        ]:
+            "//span[contains(@class, 'search-body-results-count')]",
+        ]
+        for selector in selectors:
             try:
                 elems = driver.find_elements(By.XPATH, selector)
                 for el in elems:
@@ -670,8 +672,13 @@ def get_total_results(driver):
                         return int(m.group(1).replace(',', ''))
             except Exception:
                 pass
-        # 페이지 소스에서 추출
+        
+        # 페이지 소스에서 정규식으로 직접 추출 시도
         src = driver.page_source
+        m = re.search(r'\"totalResults\":(\d+)', src)
+        if m:
+            return int(m.group(1))
+        
         m = re.search(r'([\d,]+)\s+[Rr]esult', src)
         if m:
             return int(m.group(1).replace(',', ''))
@@ -699,20 +706,44 @@ def get_current_page_number(driver):
 
 def has_search_results(driver):
     """검색 결과 있는지 확인"""
-    try:
-        # 결과 없음 메시지
-        no_result_texts = ['No results found', '결과 없음', 'no results', '0 results']
-        src_lower = driver.page_source.lower()
-        for txt in no_result_texts:
-            if txt.lower() in src_lower and 'no results' in src_lower:
+    MAX_ATTEMPTS = 3
+    for attempt in range(MAX_ATTEMPTS):
+        try:
+            wait_sec = 8 if attempt == 0 else 12
+            time.sleep(wait_sec)
+            
+            # ── 결과 없음 메시지 ──────────────────────────────────────────
+            no_result_texts = ['No results found', '결과 없음', 'no results']
+            src_lower = driver.page_source.lower()
+            for txt in no_result_texts:
+                if txt.lower() in src_lower:
+                    # "0 results" 가 명시적으로 있고 아이템이 없으면 False
+                    if '0 results' in src_lower or 'no results' in src_lower:
+                        # 하지만 간혹 헤더에 "0 results" 가 있어도 실제 항목이 로딩 중일 수 있음
+                        items = driver.find_elements(By.CSS_SELECTOR, 'li.ResultItem, div.ResultItem, a.result-list-title-link')
+                        if len(items) == 0:
+                            return False
+
+            # ── 논문 아이템 존재 확인 ──────────────────────────────────────
+            # li.ResultItem (구 버전), div.ResultItem (신 버전), a.result-list-title-link (강력한 공통)
+            items = driver.find_elements(By.CSS_SELECTOR,
+                'li.ResultItem, div.ResultItem, article.result-item, div.result-item, '
+                'li[data-aa-name="result-list-item"], a.result-list-title-link')
+            
+            if len(items) > 0:
+                return True
+            
+            if attempt < MAX_ATTEMPTS - 1:
+                print(f'[INFO] 결과 로딩 대기 중... (시도 {attempt+1}/{MAX_ATTEMPTS})')
+                driver.execute_script("window.scrollTo(0, 500);")
+                time.sleep(2)
+                driver.execute_script("window.scrollTo(0, 0);")
+            else:
                 return False
-        # 논문 아이템 존재 확인
-        items = driver.find_elements(By.CSS_SELECTOR,
-            'li.ResultItem, article.result-item, div.result-item, '
-            'li[data-aa-name="result-list-item"]')
-        return len(items) > 0
-    except Exception:
-        return True
+        except Exception:
+            if attempt == MAX_ATTEMPTS - 1:
+                return True
+    return False
 
 
 # ==================== 페이지 처리 ====================

@@ -25,11 +25,11 @@ Hyperspectral Imaging(HSI) 및 Remote Sensing 관련 논문 PDF 대용량 수집
    - 5.1 [연속 페이지 실패 감지 — 무한 루프 완전 차단](#51-연속-페이지-실패-감지--무한-루프-완전-차단)
    - 5.2 [50개 저널 순위 목록 + --num-journals 옵션](#52-50개-저널-순위-목록----num-journals-옵션)
    - 5.3 [키워드 기반 크롤링 + --with-keywords / --keywords-only 옵션](#53-키워드-기반-크롤링----with-keywords----keywords-only-옵션)
-6. [IEEE 대용량 크롤링 — 5차 개선](#ieee-대용량-크롤링--5차-개선)
-   - 6.1 [--journal-option: Publication Title 다중 선택 일괄 크롤](#61---journal-option-publication-title-다중-선택-일괄-크롤)
-7. [IEEE TGRS 크롤링 전체 흐름](#ieee-tgrs-크롤링-crawling_ieee_2023_2025py)
-6. [빠른 시작](#빠른-시작)
-7. [전체 옵션](#전체-옵션)
+7. [IEEE 대용량 크롤링 — 6차 개선](#ieee-대용량-크롤링--6차-개선)
+   - 7.1 [검색 결과 감지 로직 강화 (Retry & Long Wait)](#71-검색-결과-감지-로직-강화-retry--long-wait)
+8. [IEEE TGRS 크롤링 전체 흐름](#ieee-tgrs-크롤링-crawling_ieee_2023_2025py)
+9. [빠른 시작](#빠른-시작)
+10. [전체 옵션](#전체-옵션)
 7. [기본 저장 경로](#기본-저장-경로)
 8. [Linux 서버에서 screen으로 실행하기](#linux-서버에서-screen으로-실행하기)
 9. [예상 출력](#예상-출력)
@@ -649,6 +649,28 @@ python crawling_ieee_2023_2025.py --headless --resume --journal-option 2 --years
 
 ---
 
+## IEEE 대용량 크롤링 — 6차 개선
+
+### 7.1 검색 결과 감지 로직 강화 (Retry & Long Wait)
+
+#### 문제 상황
+- **IEEE Crawler**: 대량 크롤링 중 특정 페이지(예: p.147)에서 검색 결과가 있음에도 불구하고 "빈 페이지"로 오인하여 종료되는 현상 발생. 이는 Angular 렌더링 지연 또는 네트워크 병목으로 인해 결과 항목(`xpl-result-item`)이 즉시 나타나지 않기 때문임.
+- **ScienceDirect Crawler**: 키워드 검색 시 실제 결과가 존재함에도 "검색 결과 없음"으로 판정되어 크롤링이 중단되는 문제.
+
+#### 개선 내용
+
+| 항목 | 개선 전 | 개선 후 |
+|------|------|---------|
+| **감지 시도 횟수** | 1회 | **3회 (Retry)** |
+| **기본 대기 시간** | 3~8초 | **5~15초 (점진적 증가)** |
+| **동적 렌더링 트리거** | 없음 | 시도 실패 시 **자동 스크롤(Down->Up)** 로 Angular/React 렌더링 유도 |
+| **결과 판정 로직** | 단순 요소 체크 | **텍스트(0 results) + 헤더 숫자 + 아이템 존재** 교차 검증 |
+| **SD 셀렉터 업데이트** | 기존 방식 | `a.result-list-title-link`, `div.ResultItem` 등 최신 UI 셀렉터 추가 |
+
+이 개선을 통해 네트워크 상태가 불안정하거나 페이지 로딩이 무거운 환경에서도 크롤러가 성급하게 종료되지 않고 끝까지 데이터를 수집할 수 있습니다.
+
+---
+
 ## IEEE TGRS 크롤링 (`crawling_ieee_2023_2025.py`)
 
 ### 전체 흐름
@@ -1031,6 +1053,11 @@ python tiktoken/scripts/json_token_counter.py "파일.json"
 - 리눅스 서버 Headless 실행 시 연도별 로그 파일 생성 (`{저장경로}_logs/{연도}/crawl_*.log`)
 - 저널 필터 DOM 경로 수정 (Publication Title 섹션 XPath 확정)
 - NAS 파일시스템 Permission denied 우회 (파일 rename 제거)
+
+### 검색 결과 감지 안정화 및 ScienceDirect 키워드 검색 수정 (2026-04-20)
+- **IEEE Crawler 안정성 향상**: `has_search_results()` 에 3회 재시도(Retry) 로직 및 점진적 대기 시간(Max 15초) 추가. 특정 페이지에서 로딩 지연으로 인해 크롤링이 조기 종료되는 문제 해결
+- **ScienceDirect 키워드 검색 수정**: `div.ResultItem`, `a.result-list-title-link` 등 최신 UI 셀렉터 반영 및 결과 감지 로직 강화. 키워드 검색 시 "검색 결과 없음"으로 오판하던 현상 수정
+- **동적 렌더링 유도**: 감지 실패 시 자동 스크롤(Scroll Down -> Up)을 실행하여 Angular/React 컴포넌트의 Lazy Loading 강제 트리거
 
 ---
 
