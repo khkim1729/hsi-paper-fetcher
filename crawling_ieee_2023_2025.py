@@ -573,10 +573,9 @@ def setup_chrome_driver(download_dir, headless=False):
     # 공통 - 봇 감지 차단
     options.add_argument('--disable-blink-features=AutomationControlled')
     options.add_argument('--window-size=1920,1080')
-    options.add_argument(
-        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-        'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36'
-    )
+    # Use a realistic Windows User-Agent (avoiding version 145 which might be flagged)
+    user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+    options.add_argument(f'--user-agent={user_agent}')
     options.add_experimental_option('excludeSwitches', ['enable-automation', 'enable-logging'])
     options.add_experimental_option('useAutomationExtension', False)
 
@@ -621,6 +620,12 @@ def setup_chrome_driver(download_dir, headless=False):
                 print('[ChromeDriver] 시스템 PATH의 chromedriver 사용')
 
         driver = webdriver.Chrome(service=service, options=options)
+        
+        # More forceful User-Agent override via CDP
+        driver.execute_cdp_cmd('Network.setUserAgentOverride', {
+            "userAgent": user_agent
+        })
+        
         # navigator.webdriver 속성 숨기기 (프록시 봇 감지 차단)
         driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
             'source': 'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
@@ -674,15 +679,14 @@ def is_session_expired(driver):
 
 def has_search_results(driver):
     """현재 페이지에 검색 결과가 있는지 확인.
-
+    
     빈 페이지(마지막 페이지를 초과한 경우 등)를 감지해 False 를 반환한다.
-    크롤링 루프에서 이 함수가 False 를 반환하면 해당 저널 크롤링을 종료한다.
     """
-    MAX_CHECK_ATTEMPTS = 3
+    MAX_CHECK_ATTEMPTS = 5 # 시도 횟수 증가
     for attempt in range(MAX_CHECK_ATTEMPTS):
         try:
-            # 첫 시도 5초, 이후 시도 10초 대기
-            wait_sec = 5 if attempt == 0 else 10
+            # 대기 시간 증가 (IEEE 사이트의 느린 로딩 대응)
+            wait_sec = 10 if attempt == 0 else 15
             time.sleep(wait_sec)
 
             # ── 결과 항목 요소 확인 ──────────────────────────────────────────
@@ -2540,7 +2544,7 @@ def parse_args():
     parser.add_argument('--year',  type=str, default=None,
                         help='크롤링 단일 연도 (예: 2024)')
     parser.add_argument('--years', type=str, nargs='+', default=None,
-                        help='크롤링 연도 목록 (예: --years 2023 2024 2025, 또는 --years all)')
+                        help='크롤링 연도 목록 (예: --years 2023 2024 2025, 또는 --years all, 또는 --years auto)')
     parser.add_argument('--save-path', default=None,
                         help=f'저장 기본 경로 (기본값: {default_save})')
     parser.add_argument('--username', default=None, help='도서관 로그인 ID')
@@ -2564,14 +2568,26 @@ def main():
         raw_years = ['2023', '2024', '2025']
         print(f'[INFO] 연도 미지정 → 기본값: {raw_years}')
 
-    # 'all' 이면 ['all'] 유지, 아니면 int 변환
-    if len(raw_years) == 1 and raw_years[0].lower() == 'all':
-        years = ['all']
+    # 'all' 또는 'auto' 처리
+    if len(raw_years) == 1:
+        ry_lower = raw_years[0].lower()
+        if ry_lower == 'all':
+            years = ['all']
+        elif ry_lower == 'auto':
+            # 1980년부터 현재+1년(2026)까지 자동 생성
+            years = list(range(1980, 2027))
+            print(f'[INFO] --years auto 감지 → 1980년부터 2026년까지 순회 시작')
+        else:
+            try:
+                years = [int(y) for y in raw_years]
+            except ValueError:
+                print(f'[오류] --years 에 유효하지 않은 값 포함: {raw_years}  (숫자, all, auto 만 허용)')
+                sys.exit(1)
     else:
         try:
             years = [int(y) for y in raw_years]
         except ValueError:
-            print(f'[오류] --years 에 유효하지 않은 값 포함: {raw_years}  (숫자 또는 all 만 허용)')
+            print(f'[오류] --years 에 유효하지 않은 값 포함: {raw_years}  (숫자 또는 all/auto 만 허용)')
             sys.exit(1)
 
     # 저장 경로

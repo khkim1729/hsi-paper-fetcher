@@ -9,3 +9,7 @@ openpyxl>=3.1.0
 
 # 유틸리티
 tqdm>=4.65.0
+
+
+wikipedia-api
+requests

@@ -1,0 +1,180 @@
+hyperspectral
+wavelength
+scattering
+band
+material
+reflectance
+spectral unmixing
+material classification
+spectroscopic features
+hyperspectral imaging
+hyperspectral remote sensing
+spectral band
+wavelength band
+spectral reflectance
+material identification
+spectral signature
+hyperspectral classification
+spectral resolution
+hyperspectral sensor
+spectral library
+endmember extraction
+spectral angle mapper
+hyperspectral data
+spectral matching
+material mapping
+hyperspectral camera
+spectral analysis
+absorption band
+reflectance spectroscopy
+hyperspectral cube
+spectral dimension
+spatial resolution
+spectral preprocessing
+noise reduction
+atmospheric correction
+radiometric calibration
+geometric correction
+spectral calibration
+hyperspectral preprocessing
+dimensionality reduction
+principal component analysis
+independent component analysis
+linear spectral unmixing
+nonlinear unmixing
+abundance estimation
+subpixel classification
+pixel purity index
+band selection
+spectral indices
+vegetation indices
+normalized difference vegetation index
+soil adjusted vegetation index
+enhanced vegetation index
+normalized difference water index
+normalized difference built-up index
+mineral indices
+clay minerals
+iron oxides
+carbonate minerals
+hydroxyl minerals
+spectral mixture analysis
+multiple endmember spectral mixture analysis
+automated spectral library
+spectral database
+mineral mapping
+geological mapping
+lithological mapping
+alteration mapping
+vegetation mapping
+land cover classification
+land use classification
+crop classification
+disease detection
+precision agriculture
+environmental monitoring
+pollution detection
+water quality assessment
+coastal monitoring
+marine applications
+forest monitoring
+biodiversity assessment
+urban mapping
+archaeological applications
+food quality inspection
+pharmaceutical applications
+medical imaging
+hyperspectral microscopy
+fluorescence spectroscopy
+raman spectroscopy
+infrared spectroscopy
+near infrared
+shortwave infrared
+thermal infrared
+visible spectrum
+ultraviolet
+multispectral imaging
+hyperspectral vs multispectral
+imaging spectrometer
+pushbroom scanner
+whiskbroom scanner
+snapshot hyperspectral imaging
+hyperspectral video
+real-time processing
+onboard processing
+data compression
+lossless compression
+lossy compression
+hyperspectral storage
+electromagnetic spectrum
+spectral range
+wavelength range
+visible light
+visible wavelength
+ultraviolet spectrum
+ultraviolet radiation
+UV-A
+UV-B
+UV-C
+near infrared spectrum
+NIR
+VNIR
+visible near infrared
+shortwave infrared spectrum
+SWIR
+midwave infrared
+MWIR
+longwave infrared
+LWIR
+thermal infrared spectrum
+TIR
+far infrared
+FIR
+infrared spectrum
+infrared radiation
+microwave
+microwave spectrum
+radio waves
+radio frequency
+RF
+X-ray
+X-ray spectrum
+gamma ray
+gamma radiation
+spectral region
+wavelength interval
+bandwidth
+spectral bandwidth
+narrowband
+broadband
+spectral coverage
+wavelength coverage
+spectral sampling
+band center
+band width
+full width at half maximum
+FWHM
+spectral resolution
+wavelength resolution
+spectral binning
+band averaging
+spectral subset
+wavelength subset
+blue band
+green band
+red band
+red edge
+red edge band
+panchromatic
+panchromatic band
+multispectral bands
+hyperspectral bands
+continuous spectrum
+discrete spectrum
+spectral gaps
+atmospheric windows
+water absorption bands
+atmospheric absorption
+spectral filtering
+bandpass filter
+wavelength filter

@@ -402,10 +402,9 @@ def setup_chrome_driver(download_dir, headless=False):
 
     options.add_argument('--disable-blink-features=AutomationControlled')
     options.add_argument('--window-size=1920,1080')
-    options.add_argument(
-        '--user-agent=Mozilla/5.0 (X11; Linux x86_64) '
-        'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
-    )
+    # Use the same User-Agent that worked in diagnostic tests
+    user_agent = 'MY_CUSTOM_UA_123'
+    options.add_argument(f'--user-agent={user_agent}')
     options.add_experimental_option('excludeSwitches', ['enable-automation', 'enable-logging'])
     options.add_experimental_option('useAutomationExtension', False)
 
@@ -426,9 +425,16 @@ def setup_chrome_driver(download_dir, headless=False):
 
     try:
         driver = webdriver.Chrome(service=service, options=options)
-        driver.execute_script(
-            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-        )
+        
+        # More forceful User-Agent override via CDP
+        driver.execute_cdp_cmd('Network.setUserAgentOverride', {
+            "userAgent": user_agent
+        })
+        
+        # navigator.webdriver 속성 숨기기
+        driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+            'source': 'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
+        })
         # CDP 다운로드 경로 설정
         driver.execute_cdp_cmd('Page.setDownloadBehavior', {
             'behavior': 'allow',
@@ -628,7 +634,8 @@ def build_keyword_search_url(keyword, year):
     if not SD_PROXY_BASE:
         return None
     kw_enc = quote_plus(keyword)
-    base = f'{SD_PROXY_BASE}/search?qs={kw_enc}&articleTypes=FLA'
+    # articleTypes=FLA 제거하여 매뉴얼 검색과 결과 수 일치시킴
+    base = f'{SD_PROXY_BASE}/search?qs={kw_enc}'
     if str(year) != 'all':
         base += f'&date={year}'
     return base
@@ -688,14 +695,23 @@ def get_total_results(driver):
 
 
 def get_current_page_number(driver):
-    """현재 페이지 번호 반환. 기본 1."""
+    """현재 페이지 번호 반환. URL offset 또는 텍스트에서 파악."""
     try:
+        # 1. URL offset 파라미터 확인 (offset=25 이면 2페이지)
+        cur_url = driver.current_url
+        match = re.search(r'offset=(\d+)', cur_url)
+        if match:
+            return (int(match.group(1)) // 25) + 1
+
+        # 2. 텍스트 확인
         for selector in [
             "//*[contains(text(),'Page') and contains(text(),' of ')]",
             "//*[contains(@aria-label,'Page') and contains(@aria-label,' of ')]",
+            "//li[contains(@class, 'pagination-text')]",
         ]:
             elems = driver.find_elements(By.XPATH, selector)
             for el in elems:
+                if not el.text: continue
                 m = re.search(r'Page\s+(\d+)\s+of', el.text)
                 if m:
                     return int(m.group(1))
@@ -706,15 +722,26 @@ def get_current_page_number(driver):
 
 def has_search_results(driver):
     """검색 결과 있는지 확인"""
-    MAX_ATTEMPTS = 3
+    MAX_ATTEMPTS = 5
     for attempt in range(MAX_ATTEMPTS):
         try:
-            wait_sec = 8 if attempt == 0 else 12
+            # 대기 시간 대폭 증가 (차단 우회 및 동적 로딩 대응)
+            wait_sec = 15 if attempt == 0 else 20
             time.sleep(wait_sec)
             
             # ── 결과 없음 메시지 ──────────────────────────────────────────
             no_result_texts = ['No results found', '결과 없음', 'no results']
             src_lower = driver.page_source.lower()
+            
+            # 차단 여부 확인
+            if 'there was a problem providing the content' in src_lower or 'access denied' in src_lower:
+                print(f'[경고] ScienceDirect 차단 페이지 감지됨 (시도 {attempt+1}/{MAX_ATTEMPTS})')
+                if attempt < MAX_ATTEMPTS - 1:
+                    print('[INFO] 페이지 새로고침 및 재시도...')
+                    driver.refresh()
+                    time.sleep(10)
+                    continue # 다음 attempt로 진행
+            
             for txt in no_result_texts:
                 if txt.lower() in src_lower:
                     # "0 results" 가 명시적으로 있고 아이템이 없으면 False
@@ -764,14 +791,24 @@ def select_all_results(driver):
                 )
                 driver.execute_script(
                     'arguments[0].scrollIntoView({behavior:"instant",block:"center"});', cb)
-                time.sleep(0.5)
-                checked = (cb.get_attribute('aria-checked') == 'true' or
-                           cb.get_attribute('checked') is not None or
-                           cb.is_selected())
-                if not checked:
-                    driver.execute_script('arguments[0].click();', cb)
-                    time.sleep(0.5)
-                print('[OK] 전체 선택 완료')
+                time.sleep(1)
+                
+                # ActionChains로 클릭 시도 (더 실제와 유사)
+                from selenium.webdriver import ActionChains
+                actions = ActionChains(driver)
+                actions.move_to_element(cb).click().perform()
+                
+                time.sleep(3)
+                
+                # 선택되었는지 확인 (일부 항목이 checked 되었는지)
+                try:
+                    checked_items = driver.find_elements(By.CSS_SELECTOR, "input[type='checkbox']:checked")
+                    if len(checked_items) > 1:
+                        print(f'[OK] 전체 선택 완료 ({len(checked_items)-1}개 항목)')
+                        return True
+                except: pass
+                
+                print('[OK] 전체 선택 시도 완료')
                 return True
             except Exception:
                 pass
@@ -783,28 +820,105 @@ def select_all_results(driver):
 
 
 def trigger_download(driver):
-    """다운로드 버튼 클릭. 성공 True."""
+    """'Download X articles' 버튼 클릭. 성공 True."""
+    # 클릭 전 에러 모달 청소
+    try:
+        err_btns = driver.find_elements(By.CSS_SELECTOR, "button[aria-label='Close'], .modal-close, button.close-button")
+        for eb in err_btns:
+            if eb.is_displayed():
+                driver.execute_script("arguments[0].click();", eb)
+                time.sleep(1)
+    except: pass
     selectors = [
         'span.download-all-link-text',
         'button[data-aa-name="export-download-pdfs"]',
         'button[data-testid="export-download-pdfs"]',
+        '//button[contains(., "Download") and contains(., "articles")]',
+        '//button[contains(., "Download selected articles")]',
         '*[aria-label*="Download"]',
         'button.export-all',
     ]
     for sel in selectors:
         try:
-            el = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, sel))
-            )
+            if sel.startswith('//'):
+                el = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.XPATH, sel))
+                )
+            else:
+                el = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, sel))
+                )
             # 부모 button 찾기
             try:
                 btn = el.find_element(By.XPATH, './ancestor::button')
             except Exception:
                 btn = el
-            driver.execute_script(
-                'arguments[0].scrollIntoView({behavior:"instant",block:"center"});', btn)
-            driver.execute_script('arguments[0].click();', btn)
+            driver.execute_script('arguments[0].scrollIntoView({behavior:"instant",block:"center"});', btn)
+            time.sleep(1)
+            
+            # 버튼이 비활성 상태인지 확인
+            if btn.get_attribute('disabled'):
+                print('[INFO] 다운로드 버튼이 비활성 상태입니다. 대기 중...')
+                time.sleep(3)
+            
+            # JS로 강제 클릭 및 이벤트 발생
+            driver.execute_script("""
+                var el = arguments[0];
+                el.click();
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+            """, btn)
+            
+            # 추가로 ActionChains 시도
+            try:
+                from selenium.webdriver import ActionChains
+                actions = ActionChains(driver)
+                actions.move_to_element(btn).click().perform()
+            except: pass
+            
             print('[OK] 다운로드 버튼 클릭')
+            
+            # 에러 모달 즉시 확인
+            time.sleep(2)
+            try:
+                error_msg = driver.find_elements(By.XPATH, "//*[contains(text(), 'went wrong')]")
+                if error_msg and error_msg[0].is_displayed():
+                    print('[경고] ScienceDirect 에러 발생 ("Something went wrong")')
+                    # 닫기 시도
+                    close_btn = driver.find_elements(By.CSS_SELECTOR, "button[aria-label='Close'], .modal-close")
+                    if close_btn: driver.execute_script("arguments[0].click();", close_btn[0])
+                    return False
+            except: pass
+            
+            # 에러 모달 ('Something went wrong') 확인 및 닫기
+            try:
+                error_modal_close = driver.find_elements(By.CSS_SELECTOR, "button[aria-label='Close'], .modal-close, button.close-button")
+                if error_modal_close:
+                    print('[INFO] 에러 모달 발견 → 닫기 시도')
+                    driver.execute_script("arguments[0].click();", error_modal_close[0])
+                    time.sleep(2)
+            except: pass
+
+            # 일부 환경에서는 'Confirm' 또는 'Download' 팝업/모달이 추가로 뜰 수 있음
+            try:
+                confirm_selectors = [
+                    'button.download-button',
+                    '//button[contains(., "Confirm")]',
+                    '//button[contains(., "Download") and not(contains(., "articles"))]',
+                    'div.modal-footer button.button-primary'
+                ]
+                for c_sel in confirm_selectors:
+                    try:
+                        if c_sel.startswith('//'):
+                            c_btn = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, c_sel)))
+                        else:
+                            c_btn = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.CSS_SELECTOR, c_sel)))
+                        c_btn.click()
+                        print('[OK] 다운로드 확인 버튼 클릭됨')
+                        break
+                    except: continue
+            except: pass
+            
             return True
         except Exception:
             pass
@@ -812,20 +926,30 @@ def trigger_download(driver):
     return False
 
 
-def wait_for_download(download_dir, timeout=DOWNLOAD_WAIT_SECONDS):
-    """다운로드 완료 대기. 완료된 파일 목록 반환."""
+def wait_for_download(download_dir, before_files, timeout=DOWNLOAD_WAIT_SECONDS):
+    """신규 파일(zip/pdf)이 생길 때까지 대기. 신규 파일 목록 반환."""
     deadline = time.time() + timeout
-    crdownload_extra = 0
-    while time.time() < deadline + crdownload_extra:
-        files = list(Path(download_dir).glob('*.crdownload')) + \
-                list(Path(download_dir).glob('*.part'))
-        if files:
-            crdownload_extra = min(crdownload_extra + 60, 600)
-            time.sleep(5)
-            continue
-        # 새로 생긴 zip/pdf 확인
-        break
-    return list(Path(download_dir).glob('*.zip')) + list(Path(download_dir).glob('*.pdf'))
+    while time.time() < deadline:
+        # 진행 중인 다운로드 확인
+        temp_files = list(Path(download_dir).glob('*.crdownload')) + \
+                     list(Path(download_dir).glob('*.part'))
+        
+        current_files = set(Path(download_dir).glob('*.zip')) | set(Path(download_dir).glob('*.pdf'))
+        new_files = current_files - before_files
+        
+        if new_files and not temp_files:
+            # 신규 파일이 있고 임시 파일이 없으면 완료
+            return list(new_files)
+        
+        if temp_files:
+            # 다운로드 중이면 시간 연장 (최대 10분)
+            deadline = max(deadline, time.time() + 30)
+            
+        time.sleep(5)
+    
+    # 타임아웃 시 현재까지의 신규 파일 반환
+    current_files = set(Path(download_dir).glob('*.zip')) | set(Path(download_dir).glob('*.pdf'))
+    return list(current_files - before_files)
 
 
 def extract_zip(zip_path, extract_dir, stats):
@@ -857,40 +981,95 @@ def extract_zip(zip_path, extract_dir, stats):
 
 def process_page(driver, page_num, download_dir, stats):
     """현재 페이지 전체 선택 → 다운로드 → ZIP 처리. 성공 True."""
+    # CDP 다운로드 경로를 현재 저장 디렉토리로 동적 업데이트
+    try:
+        driver.execute_cdp_cmd('Page.setDownloadBehavior', {
+            'behavior': 'allow',
+            'downloadPath': str(Path(download_dir).absolute())
+        })
+    except Exception as e:
+        print(f'[경고] CDP 다운로드 경로 업데이트 실패: {e}')
+
     print(f'\n{"="*60}')
     print(f'페이지 {page_num} 처리')
     print('='*60)
 
-    before_zips = set(Path(download_dir).glob('*.zip'))
-    before_pdfs = set(Path(download_dir).glob('*.pdf'))
+    # 스크롤을 위로 올려 버튼이 보이게 함
+    driver.execute_script("window.scrollTo(0, 0);")
+    time.sleep(2)
 
     if not select_all_results(driver):
         stats.select_all_failures += 1
         return False
 
-    if not trigger_download(driver):
-        stats.download_failures += 1
-        return False
+    time.sleep(3) # 선택 후 버튼 활성화 대기
 
-    print(f'[대기] 다운로드 중... (최대 {DOWNLOAD_WAIT_SECONDS}초)')
-    time.sleep(DOWNLOAD_WAIT_SECONDS)
+    # 다운로드 전 상태 저장
+    before_files = set(Path(download_dir).glob('*.zip')) | set(Path(download_dir).glob('*.pdf'))
 
-    # ZIP 처리
-    after_zips = set(Path(download_dir).glob('*.zip'))
-    new_zips   = after_zips - before_zips
+    download_success = False
+    for attempt in range(2):
+        if trigger_download(driver):
+            print(f'[대기] 다운로드 중... (시도 {attempt+1}, 최대 {DOWNLOAD_WAIT_SECONDS}초)')
+            new_files = wait_for_download(download_dir, before_files, timeout=45) 
+            if new_files:
+                download_success = True
+                break
+            else:
+                print('[INFO] 다운로드 파일 미발견 → 재시도...')
+                time.sleep(5)
+        else:
+            print('[INFO] 다운로드 버튼 시도 중...')
+            time.sleep(3)
+    
+    if not download_success:
+        print('[INFO] 벌크 다운로드 실패 → 개별 PDF 다운로드 시도 (Fallback)')
+        # 개별 PDF 링크 찾기
+        pdf_links = driver.find_elements(By.XPATH, "//a[contains(., 'View PDF')]")
+        print(f'[INFO] 개별 PDF 링크 {len(pdf_links)}개 발견')
+        
+        for idx, link in enumerate(pdf_links):
+            try:
+                driver.execute_script('arguments[0].scrollIntoView({behavior:"instant",block:"center"});', link)
+                time.sleep(1)
+                # 새 탭으로 열기 또는 직접 클릭
+                before_count = len(list(Path(download_dir).glob('*.pdf')))
+                driver.execute_script("arguments[0].click();", link)
+                
+                # 개별 다운로드는 보통 빠름
+                time.sleep(10)
+                after_count = len(list(Path(download_dir).glob('*.pdf')))
+                if after_count > before_count:
+                    print(f'  [{idx+1}/{len(pdf_links)}] PDF 다운로드 성공')
+                else:
+                    print(f'  [{idx+1}/{len(pdf_links)}] PDF 다운로드 실패')
+            except Exception as e:
+                print(f'  [{idx+1}] 오류: {e}')
+        
+        # 신규 파일 다시 확인
+        new_files = list(set(Path(download_dir).glob('*.zip')) | set(Path(download_dir).glob('*.pdf')) - before_files)
+        if new_files: download_success = True
+    
     extracted  = 0
-    for zp in new_zips:
-        extracted += extract_zip(zp, download_dir, stats)
-        stats.zip_downloads += 1
+    zip_count = 0
+    for fp in new_files:
+        if fp.suffix.lower() == '.zip':
+            extracted += extract_zip(fp, download_dir, stats)
+            zip_count += 1
+            stats.zip_downloads += 1
+        elif fp.suffix.lower() == '.pdf':
+            extracted += 1
 
-    # 직접 다운로드된 PDF
-    after_pdfs = set(Path(download_dir).glob('*.pdf'))
-    new_pdfs   = after_pdfs - before_pdfs - {Path(download_dir) / z.stem for z in new_zips}
-    direct_pdfs = len(new_pdfs)
+    if extracted == 0:
+        # 실패 시 스크린샷 저장
+        try:
+            ss_path = Path(download_dir).parent / f"fail_p{page_num}.png"
+            driver.save_screenshot(str(ss_path))
+            print(f'[DEBUG] 다운로드 실패 스크린샷: {ss_path}')
+        except: pass
 
-    total_new = extracted + direct_pdfs
-    stats.pdfs_extracted += total_new
-    print(f'[OK] PDF 추출: {total_new}개  (ZIP {len(new_zips)}개, 직접 {direct_pdfs}개, 중복 {stats.duplicates_skipped}개)')
+    stats.pdfs_extracted += extracted
+    print(f'[OK] PDF 추출: {extracted}개  (ZIP {zip_count}개, 중복 {stats.duplicates_skipped}개)')
     stats.pages_processed += 1
     return True
 
@@ -898,25 +1077,86 @@ def process_page(driver, page_num, download_dir, stats):
 def go_to_next_page(driver):
     """다음 페이지로 이동. 성공 시 새 페이지 번호 반환, 마지막이면 None."""
     try:
-        btn = WebDriverWait(driver, 8).until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR,
-                "a[data-aa-name='srp-next-page'], "
-                "a[aria-label='Next page'], "
-                "button[aria-label='Next page']"))
-        )
-        driver.execute_script(
-            'arguments[0].scrollIntoView({behavior:"instant",block:"center"});', btn)
-        driver.execute_script('arguments[0].click();', btn)
-        time.sleep(PAGE_CHANGE_DELAY)
-        WebDriverWait(driver, 20).until(
-            lambda d: d.execute_script('return document.readyState') == 'complete'
-        )
+        # 에러 모달 ('Something went wrong') 확인 및 닫기
+        try:
+            error_modal_close = driver.find_elements(By.CSS_SELECTOR, "button[aria-label='Close'], .modal-close, button.close-button")
+            if error_modal_close:
+                driver.execute_script("arguments[0].click();", error_modal_close[0])
+                time.sleep(2)
+        except: pass
+
+        # 하단으로 천천히 스크롤하여 버튼 노출 유도
+        for h in range(0, 4):
+            driver.execute_script(f"window.scrollTo(0, document.body.scrollHeight * {h/4});")
+            time.sleep(0.5)
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
         time.sleep(2)
+        
+        selectors = [
+            "a[data-aa-name='srp-next-page']",
+            "li.pagination-link.next-link a",
+            "a[aria-label='Next page']",
+            "button[aria-label='Next page']",
+            "a.next-link",
+            "//a[contains(@class, 'next')]",
+            "//a[contains(., 'next')]",
+            "//button[contains(., 'next')]"
+        ]
+        
+        btn = None
+        for sel in selectors:
+            try:
+                if sel.startswith('//'):
+                    btn = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.XPATH, sel)))
+                else:
+                    btn = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.CSS_SELECTOR, sel)))
+                if btn: break
+            except: continue
+            
+        if btn:
+            driver.execute_script('arguments[0].scrollIntoView({behavior:"instant",block:"center"});', btn)
+            time.sleep(1)
+            
+            # 여러 클릭 방식 시도
+            try:
+                driver.execute_script('arguments[0].click();', btn)
+            except:
+                from selenium.webdriver import ActionChains
+                actions = ActionChains(driver)
+                actions.move_to_element(btn).click().perform()
+            
+            time.sleep(PAGE_CHANGE_DELAY)
+            WebDriverWait(driver, 20).until(
+                lambda d: d.execute_script('return document.readyState') == 'complete'
+            )
+            time.sleep(3)
+            new_p = get_current_page_number(driver)
+            if new_p and new_p > 1: # 페이지가 바뀌었으면 성공
+                return new_p
+
+        # 클릭 실패 또는 페이지 부동 시 URL 직접 조작 (Fallback)
+        print('[INFO] 버튼 클릭으로 페이지 이동 실패 → URL 직접 이동 시도')
+        current_url = driver.current_url
+        if 'offset=' in current_url:
+            # 기존 offset 제거 후 갱신
+            import re
+            new_offset = 25 # 일단 2페이지로 가정하거나 범용적으로 계산 필요
+            # 실제로는 현재 페이지 * 25 로 계산
+            current_p = get_current_page_number(driver) or 1
+            new_offset = current_p * 25
+            url_no_offset = re.sub(r'([&?])offset=\d+', r'\1', current_url).rstrip('&?')
+            sep = '&' if '?' in url_no_offset else '?'
+            next_url = f"{url_no_offset}{sep}offset={new_offset}"
+        else:
+            sep = '&' if '?' in current_url else '?'
+            next_url = f"{current_url}{sep}offset=25"
+            
+        print(f'→ URL 이동: {next_url}')
+        driver.get(next_url)
+        time.sleep(8)
         return get_current_page_number(driver)
-    except TimeoutException:
-        return None
+        
     except Exception as e:
-        print(f'[경고] 다음 페이지 이동 실패: {e}')
         return None
 
 

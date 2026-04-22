@@ -27,17 +27,19 @@ Hyperspectral Imaging(HSI) 및 Remote Sensing 관련 논문 PDF 대용량 수집
    - 5.3 [키워드 기반 크롤링 + --with-keywords / --keywords-only 옵션](#53-키워드-기반-크롤링----with-keywords----keywords-only-옵션)
 7. [IEEE 대용량 크롤링 — 6차 개선](#ieee-대용량-크롤링--6차-개선)
    - 7.1 [검색 결과 감지 로직 강화 (Retry & Long Wait)](#71-검색-결과-감지-로직-강화-retry--long-wait)
-8. [IEEE TGRS 크롤링 전체 흐름](#ieee-tgrs-크롤링-crawling_ieee_2023_2025py)
-9. [빠른 시작](#빠른-시작)
-10. [전체 옵션](#전체-옵션)
-7. [기본 저장 경로](#기본-저장-경로)
-8. [Linux 서버에서 screen으로 실행하기](#linux-서버에서-screen으로-실행하기)
-9. [예상 출력](#예상-출력)
-10. [예상 결과물](#예상-결과물)
-11. [ScienceDirect 크롤링](#sciencedirect-크롤링)
-12. [위키피디아 크롤링](#위키피디아-크롤링)
-13. [토큰 수 계산](#토큰-수-계산)
-14. [변경 이력](#변경-이력)
+8. [IEEE 대용량 크롤링 — 7차 개선](#ieee-대용량-크롤링--7차-개선)
+   - 8.1 [연도 자동 순회 (--years auto)](#81-연도-자동-순회---years-auto)
+9. [IEEE TGRS 크롤링 전체 흐름](#ieee-tgrs-크롤링-crawling_ieee_2023_2025py)
+10. [빠른 시작](#빠른-시작)
+11. [전체 옵션](#전체-옵션)
+12. [기본 저장 경로](#기본-저장-경로)
+13. [Linux 서버에서 screen으로 실행하기](#linux-서버에서-screen으로-실행하기)
+14. [예상 출력](#예상-출력)
+15. [예상 결과물](#예상-결과물)
+16. [ScienceDirect 크롤링](#sciencedirect-크롤링)
+17. [위키피디아 크롤링](#위키피디아-크롤링)
+18. [토큰 수 계산](#토큰-수-계산)
+19. [변경 이력](#변경-이력)
 
 ---
 
@@ -671,6 +673,29 @@ python crawling_ieee_2023_2025.py --headless --resume --journal-option 2 --years
 
 ---
 
+## IEEE 대용량 크롤링 — 7차 개선
+
+### 8.1 연도 자동 순회 (--years auto)
+
+#### 배경
+IEEE Xplore의 검색 결과 페이징 제한(약 2,000건) 문제를 해결하고, 1980년부터 현재까지의 방대한 데이터를 안정적으로 수집하기 위해 **연도별 자동 순회 모드**를 추가했습니다.
+
+#### 동작 방식
+- `--years auto` 옵션 지정 시, **1980년부터 2026년까지**의 연도를 자동으로 생성하여 루프를 돕니다.
+- 각 연도마다:
+  1. Advanced Search에서 해당 연도(Start/End Year)를 설정하여 검색 범위를 좁힙니다. (한 번의 검색 결과가 2,000건을 넘지 않도록 유도)
+  2. 해당 연도의 논문을 모두 수집합니다.
+  3. 수집된 PDF는 연도별 폴더(예: `/.../1980/`, `/.../1981/`)에 자동으로 분류되어 저장됩니다.
+- `--resume` 옵션과 결합하면, 연도별 진행 상황(`progress_{YEAR}.json`)을 참조하여 중단된 지점부터 안전하게 재개합니다.
+
+#### 사용법
+```bash
+# 1980~2026년 전체 자동 순회 크롤링 (50개 주요 저널 대상)
+python crawling_ieee_2023_2025.py --headless --years auto --num-journals 50 --resume
+```
+
+---
+
 ## IEEE TGRS 크롤링 (`crawling_ieee_2023_2025.py`)
 
 ### 전체 흐름
@@ -757,7 +782,7 @@ python crawling_ieee_2023_2025.py --year 2023 --username myid --password mypw
 | `--with-keywords` | — | 저널 크롤링 후 54개 키워드 기반 추가 크롤링 실행 |
 | `--keywords-only` | — | 키워드 기반 크롤링만 실행 (저널 크롤링 건너뜀) |
 | `--year INT` | — | 단일 연도 (예: `--year 2024`) |
-| `--years INT...` | — | 복수 연도 (예: `--years 2023 2024 2025`) |
+| `--years INT...` | — | 복수 연도 (예: `--years 2023 2024 2025`, `--years all`, `--years auto`) |
 | `--save-path PATH` | Linux/Windows 기본값 | PDF 저장 기본 경로 |
 | `--username STR` | — | 도서관 로그인 ID |
 | `--password STR` | — | 도서관 로그인 비밀번호 |
