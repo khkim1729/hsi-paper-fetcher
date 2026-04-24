@@ -1,0 +1,487 @@
+hyperspectral
+wavelength
+scattering
+band
+material
+reflectance
+hyperspectral imaging
+spectral band
+spectral reflectance
+material identification
+spectral signature
+spectral resolution
+hyperspectral camera
+spectral analysis
+absorption band
+spectral dimension
+spatial resolution
+noise reduction
+atmospheric correction
+radiometric calibration
+dimensionality reduction
+principal component analysis
+independent component analysis
+abundance estimation
+normalized difference vegetation index
+enhanced vegetation index
+normalized difference water index
+clay minerals
+iron oxides
+carbonate minerals
+geological mapping
+precision agriculture
+environmental monitoring
+forest monitoring
+medical imaging
+fluorescence spectroscopy
+raman spectroscopy
+infrared spectroscopy
+near infrared
+thermal infrared
+visible spectrum
+ultraviolet
+multispectral imaging
+imaging spectrometer
+pushbroom scanner
+whiskbroom scanner
+snapshot hyperspectral imaging
+real-time processing
+onboard processing
+data compression
+lossless compression
+lossy compression
+electromagnetic spectrum
+spectral range
+visible light
+visible wavelength
+ultraviolet spectrum
+ultraviolet radiation
+UV-A
+UV-B
+UV-C
+near infrared spectrum
+NIR
+VNIR
+SWIR
+MWIR
+LWIR
+TIR
+far infrared
+FIR
+infrared spectrum
+infrared radiation
+microwave
+microwave spectrum
+radio waves
+radio frequency
+RF
+X-ray
+X-ray spectrum
+gamma ray
+gamma radiation
+spectral region
+bandwidth
+spectral bandwidth
+narrowband
+broadband
+band width
+full width at half maximum
+FWHM
+blue band
+green band
+red band
+red edge
+panchromatic
+continuous spectrum
+discrete spectrum
+atmospheric windows
+atmospheric absorption
+bandpass filter
+Hyperspectral Imager for the Coastal Ocean
+Hyperspectral Observer for Venus Reconnaissance
+Hyperspectral imaging system
+Hyperspectral Imaging Satellite
+Hyperspecial subgroup
+Wavelength-division multiplexing
+Wavelength (1967 film)
+Wavelength (album)
+Wavelength (game)
+Wavelength selective switching
+Wavelength shifter
+Wavelength (1983 film)
+Wavelength-dispersive X-ray spectroscopy
+Wavelength 30
+Scattering parameters
+The Scattering (album)
+Scattering and Neutrino Detector
+Scattering amplitude
+Scatterlings of Africa
+Scattering from rough surfaces
+Scattering CJ
+The Scattering of Ashes
+Scattering (Dune)
+Band of Brothers (miniseries)
+Bandar Abbas
+The Band
+Antonio Banderas
+Bandy
+Bandaranaike International Airport
+Stepan Bandera
+Bandar bin Sultan Al Saud
+Bandung
+Materials science
+Materialism
+Materialists (film)
+Material Girl
+Material conditional
+Material unaccounted for
+Materials Technology Laboratory
+Material properties of diamond
+Materialism controversy
+Reflectance paper
+Reflectance difference spectroscopy
+Reflectance Transformation Imaging
+Reluctance motor
+Refractance window drying
+Reflectone
+Reflector (cellular automaton)
+Reluctance
+Spectral band replication
+Spectrum analyzer
+Spectral bat
+Spectral radius
+Spectral radiance
+Spectral rendering
+Spectral induced polarisation
+Spectral reflectance curve
+Special resolution
+Spectral Analysis Review
+Spectrum analysis, mass
+Sectoral analysis
+Absorption barrier
+Absorption hardening
+Special Dimension
+Noise reduction coefficient
+Noise reduction in radio broadcasting
+Noise-reduction headphones
+Noise reduction (disambiguation)
+Atmospheric correction for interferometric synthetic aperture radar technique
+Atmospheric convection
+Clay mineral
+Clay Minerals Society
+Clay mineral X-ray diffraction
+Iron oxide
+Iron oxide copper gold ore deposits
+Iron-oxidizing bacteria
+Iron oxide nanoparticle
+Iron oxide red
+Iron oxide cycle
+Iron brides
+Iron oxide adsorption
+Ironside (cavalry)
+Ironside State School
+Carbonate mineral
+Geological mapping of Georgia (U.S. state)
+Geological mapping of Venus
+Environmental Monitoring and Assessment
+Environmental monitoring satellite
+Medical imaging in pregnancy
+Medical Imaging and Technology Alliance
+Infrared spectroscopy correlation table
+Infrared spectroscopy of metal carbonyls
+Near-infrared spectroscopy
+Near-infrared window in biological tissue
+Near Infrared Camera and Multi-Object Spectrometer
+Near-infrared vein finder
+Near-Infrared Mapping Spectrometer
+Near infrared interactance
+Near Infrared Camera
+Near Infrared Spectrograph
+Near Infrared (NIR) Signature Management Technology
+Thermal infrared spectroscopy
+Thermal infrared face recognition
+Thermal infraRed Imaging Satellite for High-resolution Natural resource Assessment
+Thermal and infrared imaging
+Visible spectrum telescope
+Ultraviolet germicidal irradiation
+Ultraviolet–visible spectroscopy
+UltraViolet (website)
+Ultraviolet index
+Ultraviolet (film)
+Ultraviolet (restaurant)
+Ultraviolet (Light My Way)
+Ultraviolet catastrophe
+Ultraviolet (TV serial)
+Push broom scanner
+Whisk broom scanner
+Data compression ratio
+Data compression symmetry
+Data compression/JPEG
+Data compression/MP3
+Data compression/entropy
+Data compression/Huffman coding
+Data compression/lossless
+Data Compression/sampling frequency
+Data compression/lossy
+Lossless compression of G.711 pulse code modulation
+Lossy compression artefact
+Electromagnetic spectroscopy
+Spectrum Range
+Spectral algebraic geometry
+Spectral band emission
+Visible light communication
+Visible-light astronomy
+Visible light imaging
+Visible Light Photon Counter
+Visible-light
+Visible light microscope
+Visible light telescope
+Visible Light (anthology)
+Visible light transmittance
+Ultraviolet spectrophotometer
+Ultraviolet irradiation therapy
+UV-absorber
+UV astronomy
+UV Arietis
+Uvalde school shooting
+Uvalde, Texas
+Uvalde County, Texas
+Uva Paranagama Polling Division
+Uva Province
+Uvalde Consolidated Independent School District
+UV-B lamps
+UV blocker
+UV Baby Green Lancers
+UV beads
+UVB-76
+UVB-induced apoptosis
+UVB phototherapy
+Uvby98
+Uvbie language
+UV curing
+UV coating
+UV coloration in flowers
+UV coordinate
+UV cross-linking
+UV curve
+UV Ceti star
+UV Cet
+Uv catastrophe
+Nirvana (band)
+Nirvana (Buddhism)
+Nirvana
+Nirvanna the Band the Show the Movie
+Nirvana discography
+Nirmatrelvir/ritonavir
+Nirmal Purja
+Nirvanna the Band the Show
+Nirvana bootleg recordings
+V. Nirmala
+VNI
+Virtual International Authority File
+Virginia
+Virat Kohli
+Virginia Tech shooting
+Virginia Woolf
+Virus
+Virtual private network
+Swire
+Swire Properties
+Swirlies
+Rob Swire
+Seth Swirsky
+Jim Swire
+Hugo Swire
+Nicholas Swirad
+Filip Swirski
+Kilemi Mwiria
+Kawira Mwirichia
+John Paul Mwirigi
+David Mwiraria
+Mwiri
+Mwiruzi River
+Paul Mwiru
+MWIRMS
+John Mwirichia
+Lwiro shrew
+L. wiracocha
+Annabella Lwin
+LWRC M6
+LwIP
+Loire
+Liriodendron tulipifera
+Lwin Moe Aung
+Thakin Lwin
+Tire
+Tiruchirappalli
+Tirana
+Tire code
+Tirupati
+Tiraspol
+Tirzepatide
+Tirunelveli
+Tirthankara
+Far-infrared Outgoing Radiation Understanding and Monitoring
+Far-infrared astronomy
+Far-infrared laser
+Far Infrared and Sub-millimetre Telescope
+Far infrared sauna
+Far-Infrared Surveyor
+Fast Infrared Exoplanet Spectroscopy Survey Explorer
+Firefox
+Firefly (TV series)
+First-past-the-post voting
+First Amendment to the United States Constitution
+First presidency of Donald Trump
+First Council of Nicaea
+First Sino-Japanese War
+First Indochina War
+First Jewish–Roman War
+Infrared Spectrometer for ExoMars
+Infrared Spectrometer And Array Camera
+Microwave oven
+Microwave transmission
+Microwave burn
+Microwave auditory effect
+Microwave (American band)
+Microwave Sounding Unit temperature measurements
+Microwave cavity
+Microwave landing system
+Microwave radiometer
+Microwave spectroscopy
+Microwave spectroscope
+Radio wave
+Radio Waves (Joan Osborne album)
+Radio Waves (Roger Waters song)
+Radio Waves (Eli Young Band song)
+Radio Waves (radio station)
+Radio Waves (Bob & Tom album)
+Radio Waves (The Black Sorrows album)
+Radio Waves (Seigmen album)
+Radio Waves (Rob Schneiderman album)
+Radio-frequency identification
+Radiofrequency ablation
+Radio-frequency microelectromechanical system
+Radio-frequency engineering
+Radio Frequency Systems
+Radio-frequency identification in schools
+Radio-frequency skin tightening
+Radio-frequency welding
+Radio frequency over glass
+RFK Racing
+RFL Championship
+RFDS (TV series)
+RFK Racing in the NASCAR Cup Series
+RFactor 2
+RFL League One
+RFK Racing in the NASCAR Xfinity Series
+RF chain
+RFC Liège
+X-ray crystallography
+X-ray photoelectron spectroscopy
+X-ray astronomy
+X-ray fluorescence
+X-ray microtomography
+X-ray diffraction
+X-Ray Spex
+X-ray tube
+X-ray telescope
+X-Ray Spectrometry (journal)
+Gamma-ray burst
+Gamma Ray (band)
+Gamma-ray astronomy
+Gamma-ray burst progenitors
+Gamma Ray discography
+Gamma-ray burst emission mechanisms
+Gamma-ray spectrometer
+Gamma ray cross section
+Gamma-ray laser
+Gamma irradiation
+Special Region of Yogyakarta
+Special Region of Surakarta
+Special Region of Jakarta Act
+Spectral regrowth
+Special Region of Jakarta
+Special Region of Kutai
+Special Region of Nanggroe Aceh Darussalam
+Special Region (Mars)
+Special regions of Indonesia
+Bandwidth throttling
+Bandwidth (computing)
+Bandwidth (signal processing)
+Bandwidth allocation
+Bandwidth management
+Bandwidth Inc.
+Bandwidth compression
+Bandwidth-delay product
+Bandwidth Broker
+Narrowband IoT
+Narrowband FM
+Narrowband ISDN
+Narrowband CDMA
+Narrowband UVB therapy
+Narrowband modem
+Narrowband television
+Narrow-band imaging
+Narrow-banded copperhead
+Broadband universal service
+Broadband over power lines
+BroadbandTV Corp
+Broadband for Rural Nova Scotia initiative
+Broadband Commission for Sustainable Development
+Broadband Global Area Network
+Broadband for the Rural North
+Broadband Stakeholder Group
+Broadband mapping in the United States
+F. W. H. Myers
+Fehmarn Belt fixed link
+FHM's 100 Sexiest Women (UK)
+FHM
+Fahmi Fadzil
+Fahmi al-Jarjawi School attack
+Bekim Fehmiu
+Fehmarn
+Fahmida Nabi
+Blue-banded toucanet
+Blue-banded wrasse
+Blue-banded pitta
+Blue Band (brand)
+Blue Bandana
+Blue banded surgeonfish
+Blue-banded grass-parakeet
+Blue-banded morpho
+Blue-banded Eggfly
+Green-banded broodsac
+Green-banded peacock
+Green-banded swallowtail
+Green-band Mariposa Lily
+Green banded goby
+Green-banded urania
+Green-banded anole
+Green banded hawkmoth
+Green-banded White
+Red Band Society
+Red-banded fruiteater
+Red-banded hairstreak
+Red-banded flowerpecker
+Red Bandana
+Red Bandits of Mawddwy
+Red banded poison frog
+Red Bandana (Aaron Watson album)
+Red banded krait
+Red-edged acleris moth
+Red-edged White
+Red-edged Ciliate Blue
+Red-edged Playboy
+Red-eared slider
+Red envelope
+Red Dead Redemption 2
+Red deer
+Red Eye (British TV series)
+Panchromatic film
+Panchromatic Hubble Andromeda Treasury
+Psychromatic
+Continuous spectrum (functional analysis)
+Discrete spectrum (mathematics)
+Atmospheric window
+Band-pass filter

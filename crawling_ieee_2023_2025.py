@@ -165,48 +165,96 @@ class CrawlStats:
     def checkpoint(self):
         """현재 통계를 CSV에 즉시 반영 (upsert).
 
-        (date, start_time, year_crawled, journal) 으로 행을 식별해
-        이미 있으면 업데이트, 없으면 추가한다.
+        날짜가 변경되었을 경우, 이전 날짜의 통계를 마감하고 새 행을 생성한다.
         zip 1건 처리 후마다 호출해 실시간으로 파일을 갱신할 수 있다.
         """
         try:
             MANAGE_FILES_PATH.mkdir(parents=True, exist_ok=True)
-            ym = datetime.now().strftime('%Y_%m')
+            
+            now = datetime.now()
+            today_str = now.strftime('%Y-%m-%d')
+
+            # [날짜 변경 감지]
+            if self.date != today_str:
+                # 1. 이전 날짜의 행을 23:59:59로 마감하여 저장
+                try:
+                    # 이전 날짜 기준의 파일명 결정
+                    old_dt = datetime.strptime(self.date, '%Y-%m-%d')
+                    old_ym = old_dt.strftime('%Y_%m')
+                except Exception:
+                    old_ym = now.strftime('%Y_%m')
+                
+                old_csv_path = MANAGE_FILES_PATH / f'stats_{old_ym}.csv'
+                
+                old_row = self.as_row()
+                old_row['end_time'] = '23:59:59'
+                # 마감 시점의 경과 시간 계산 (정확하진 않지만 대략적 반영)
+                try:
+                    end_of_day = old_dt.replace(hour=23, minute=59, second=59)
+                    old_row['elapsed_minutes'] = round((end_of_day - self._start_dt).total_seconds() / 60, 2)
+                except Exception:
+                    pass
+                
+                self._update_csv_file(old_csv_path, old_row)
+                print(f'[INFO] 날짜 변경 감지 ({self.date} -> {today_str}). 이전 통계 마감 및 신규 행 시작.')
+
+                # 2. 상태 초기화 (새 날짜 시작)
+                self.date = today_str
+                self.start_time = '00:00:00'
+                self.end_time = ''
+                self._start_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                self.elapsed_minutes = 0.0
+                
+                # 카운터 리셋
+                self.pages_processed = 0
+                self.pages_skipped = 0
+                self.zip_downloads = 0
+                self.pdfs_extracted = 0
+                self.duplicates_skipped = 0
+                self.select_all_failures = 0
+                self.download_failures = 0
+                self.session_relogins = 0
+
+            # 3. 현재 상태 저장
+            ym = now.strftime('%Y_%m')
             csv_path = MANAGE_FILES_PATH / f'stats_{ym}.csv'
-
-            session_key = (self.date, self.start_time,
-                           str(self.year_crawled), self.journal)
-            rows = []
-            found = False
-
-            if csv_path.exists():
-                with open(csv_path, 'r', newline='', encoding='utf-8') as f:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        key = (row.get('date', ''), row.get('start_time', ''),
-                               row.get('year_crawled', ''), row.get('journal', ''))
-                        if key == session_key:
-                            rows.append(self.as_row())
-                            found = True
-                        else:
-                            rows.append(row)
-
-            if not found:
-                rows.append(self.as_row())
-
-            with open(csv_path, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.DictWriter(f, fieldnames=CrawlStats.CSV_COLUMNS)
-                writer.writeheader()
-                writer.writerows(rows)
+            self._update_csv_file(csv_path, self.as_row())
 
         except Exception as e:
             print(f'[경고] 통계 CSV 업데이트 실패: {e}')
+
+    def _update_csv_file(self, csv_path, data_row):
+        """실제 CSV 파일에 행을 기록 (upsert) 하는 헬퍼 메서드."""
+        session_key = (data_row['date'], data_row['start_time'],
+                       str(data_row['year_crawled']), data_row['journal'])
+        rows = []
+        found = False
+
+        if csv_path.exists():
+            with open(csv_path, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    key = (row.get('date', ''), row.get('start_time', ''),
+                           row.get('year_crawled', ''), row.get('journal', ''))
+                    if key == session_key:
+                        rows.append(data_row)
+                        found = True
+                    else:
+                        rows.append(row)
+
+        if not found:
+            rows.append(data_row)
+
+        with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=CrawlStats.CSV_COLUMNS)
+            writer.writeheader()
+            writer.writerows(rows)
 
 
 def write_stats_row(stats: CrawlStats):
     """저널 완료 시 최종 통계를 CSV에 반영 (checkpoint 의 alias)."""
     stats.checkpoint()
-    print(f'[STATS] stats_{datetime.now().strftime("%Y_%m")}.csv 최종 저장 완료')
+    print(f'[STATS] stats_{datetime.now().strftime("%Y_%m")}.csv 저장 완료')
 
 
 # ==================== 진행 상황 추적 (resume 지원) ====================
