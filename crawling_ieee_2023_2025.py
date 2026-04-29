@@ -786,8 +786,16 @@ def has_search_results(driver):
                 driver.execute_script("window.scrollTo(0, 0);")
             else:
                 # 마지막 시도까지 실패
-                print('[감지] 결과 아이템·헤더 미발견 → 빈 페이지 (저널 마지막 페이지 초과)')
-                return False
+                # [강화] "0 Results" 텍스트를 명확히 찾지 못한 상태에서 아이템만 없는 경우,
+                # 네트워크 지연이나 일시적 UI 로딩 실패일 가능성이 높음.
+                # 종료(False) 대신 결과가 있다고 가정(True)하여 상위 루프에서 재시도하게 유도한다.
+                src_lower = driver.page_source.lower()
+                if '0 results' in src_lower or 'no results' in src_lower or 'returned no results' in src_lower:
+                    print('[감지] 결과 아이템 미발견 & "0 results" 텍스트 확인됨 → 종료')
+                    return False
+                else:
+                    print('[경고] 결과 아이템 미발견 (텍스트 미확인) → 로딩 실패로 간주, 결과 있다고 가정 (재시도 유도)')
+                    return True
 
         except Exception as e:
             if attempt < MAX_CHECK_ATTEMPTS - 1:
@@ -1723,9 +1731,7 @@ def process_current_page(driver, page_number, config, stats=None):
             print(f'[오류] {e}')
             raise
 
-    print(f'[실패] 페이지 {page_number}: Seat Limit 재시도 초과')
-    if stats is not None:
-        stats.pages_skipped += 1
+    print(f'[실패] 페이지 {page_number}: 연속 재시도 초과 (Seat Limit 또는 다운로드 타임아웃)')
     return False
 
 
